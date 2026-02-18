@@ -1,0 +1,39 @@
+# UTF-8
+#
+# Windows version-info resource file for PyInstaller.
+# Відображається у "Властивості файлу" → вкладка "Подробиці".
+#
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(2, 0, 0, 0),
+    prodvers=(2, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,       # VOS_NT_WINDOWS32
+    fileType=0x1,     # VFT_APP
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          u'040904B0',  # English (US) + Unicode
+          [
+            StringStruct(u'CompanyName',      u'Artem Marchenko'),
+            StringStruct(u'FileDescription',  u'SecureShare — P2P File Transfer'),
+            StringStruct(u'FileVersion',      u'2.0.0.0'),
+            StringStruct(u'InternalName',     u'SecureShare'),
+            StringStruct(u'LegalCopyright',   u'Copyright © 2026 Artem Marchenko. All rights reserved.'),
+            StringStruct(u'OriginalFilename', u'SecureShare.exe'),
+            StringStruct(u'ProductName',      u'SecureShare'),
+            StringStruct(u'ProductVersion',   u'2.0.0.0'),
+            StringStruct(u'Comments',         u'Secure end-to-end encrypted file sharing over the internet.'),
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct(u'Translation', [0x0409, 1200])])
+  ]
+)
