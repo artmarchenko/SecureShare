@@ -72,8 +72,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install websockets
-        run: pip install "websockets>=12.0,<17.0"
+      - name: Install test dependencies
+        run: pip install "websocket-client>=1.7.0"
 
       - name: Run server test suite
         run: python server/test_relay.py
