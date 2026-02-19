@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [('assets/SecureShare.ico', 'assets'), ('assets/icon_32.png', 'assets')]
 binaries = []
 hiddenimports = ['customtkinter', 'certifi', 'websocket']
 tmp_ret = collect_all('customtkinter')
@@ -45,4 +45,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version='version_info.txt',
+    icon='assets/SecureShare.ico',
 )
