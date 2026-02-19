@@ -168,6 +168,11 @@ def _do_key_exchange(
         "Version negotiation: us=proto%d/app%s, peer=proto%d/app%s",
         PROTOCOL_VERSION, APP_VERSION, peer_proto, peer_app,
     )
+    if on_status:
+        on_status(
+            f"🔗 Протокол: v{PROTOCOL_VERSION} ↔ v{peer_proto} "
+            f"(app {APP_VERSION} ↔ {peer_app})"
+        )
 
     if peer_proto < MIN_PROTOCOL_VERSION:
         if on_status:
