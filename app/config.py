@@ -19,4 +19,4 @@ SESSION_CODE_LENGTH = 8
 
 # ── App ────────────────────────────────────────────────────────────
 APP_NAME = "SecureShare"
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.0.4"
