@@ -35,5 +35,6 @@ releases/
 *.cer
 .env
 
-# Sensitive infrastructure data
+# Local-only scripts & sensitive data
+sign.ps1
 server/VPS_INFO.md
