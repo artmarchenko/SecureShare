@@ -145,7 +145,8 @@ class CryptoSession:
 
     def get_verification_code(self) -> str:
         """Short code both users can compare to confirm no MITM."""
-        assert self._shared_key, "Call derive_shared_key first"
+        if not self._shared_key:
+            raise ValueError("Call derive_shared_key first")
         h = hashlib.sha256(self._shared_key + b"secureshare-verify").hexdigest()
         return f"{h[:4]}-{h[4:8]}".upper()
 
@@ -158,7 +159,8 @@ class CryptoSession:
         Nonce = 4-byte prefix ‖ 8-byte counter (big-endian).
         AAD = session code (UTF-8 bytes).
         """
-        assert self._aes, "Call derive_shared_key first"
+        if not self._aes:
+            raise ValueError("Call derive_shared_key first")
         nonce = struct.pack("!IQ", self._nonce_prefix, self._send_counter)[
             : self.NONCE_LEN
         ]
@@ -172,7 +174,8 @@ class CryptoSession:
         GCM tag verification + AAD binding ensures authenticity and
         prevents cross-session substitution.
         """
-        assert self._aes, "Call derive_shared_key first"
+        if not self._aes:
+            raise ValueError("Call derive_shared_key first")
         nonce = data[: self.NONCE_LEN]
         ciphertext = data[self.NONCE_LEN :]
         return self._aes.decrypt(nonce, ciphertext, self._aad)
