@@ -6,7 +6,6 @@ __pycache__/
 *.egg
 dist/
 build/
-*.spec
 
 # PyInstaller
 *.manifest
@@ -29,8 +28,12 @@ Thumbs.db
 desktop.ini
 
 # Project-specific
-tools/cloudflared.exe
+tools/
 releases/
 *.exe
 *.pfx
 *.cer
+.env
+
+# Sensitive infrastructure data
+server/VPS_INFO.md
