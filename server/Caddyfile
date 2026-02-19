@@ -13,6 +13,15 @@ secureshare-relay.duckdns.org {
         respond "ok" 200
     }
 
+    # App download — static .exe served from /downloads
+    handle /download/* {
+        uri strip_prefix /download
+        root * /downloads
+        header Content-Disposition "attachment"
+        header Cache-Control "no-cache"
+        file_server
+    }
+
     # WebSocket relay — pass real client IP
     reverse_proxy relay:8765 {
         header_up X-Forwarded-For {remote_host}
