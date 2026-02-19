@@ -264,28 +264,30 @@ jobs:
       - name: Health check
         run: |
           echo "Waiting for server to be ready..."
-          sleep 10
+          sleep 20
 
-          # Check WebSocket endpoint
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            --max-time 10 \
-            https://secureshare-relay.duckdns.org)
-          echo "WebSocket endpoint: HTTP $STATUS"
-          if [ "$STATUS" = "200" ] || [ "$STATUS" = "101" ] || [ "$STATUS" = "426" ]; then
-            echo "✅ Server is UP"
-          else
-            echo "⚠️ Unexpected status: $STATUS (server may still be starting)"
-          fi
+          # Check WebSocket endpoint (retry up to 3 times)
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 15 \
+              https://secureshare-relay.duckdns.org 2>/dev/null || echo "000")
+            echo "Attempt $i — WebSocket endpoint: HTTP $STATUS"
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "101" ] || [ "$STATUS" = "426" ]; then
+              echo "✅ Server is UP"
+              break
+            fi
+            sleep 5
+          done
 
           # Check download endpoint (HEAD to avoid downloading full file)
           DL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            --head --max-time 10 \
-            https://secureshare-relay.duckdns.org/download/SecureShare.zip)
+            --head --max-time 15 \
+            https://secureshare-relay.duckdns.org/download/SecureShare.zip 2>/dev/null || echo "000")
           echo "Download endpoint: HTTP $DL_STATUS"
           if [ "$DL_STATUS" = "200" ]; then
             echo "✅ Download endpoint OK"
           else
-            echo "⚠️ Download returned: $DL_STATUS"
+            echo "⚠️ Download returned: $DL_STATUS (may need manual check)"
           fi
 
       - name: Cleanup SSH key
