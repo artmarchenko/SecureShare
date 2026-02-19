@@ -43,16 +43,40 @@ PEER_WAIT_TIMEOUT = 300             # 5 min waiting for second peer
 HANDSHAKE_TIMEOUT = 15              # seconds to send session code
 MAX_SESSION_BYTES = int(os.getenv("RELAY_MAX_SESSION_BYTES",
                                    str(5 * 1024 * 1024 * 1024)))  # 5 GB per session
+BACKPRESSURE_HIGH = int(os.getenv("RELAY_BP_HIGH", str(4 * 1024 * 1024)))  # 4 MB — pause reading
+BACKPRESSURE_LOW = int(os.getenv("RELAY_BP_LOW", str(1 * 1024 * 1024)))    # 1 MB — resume reading
+BACKPRESSURE_TIMEOUT = 30  # seconds to wait before giving up
 
 # Trusted proxy subnets (Docker internal networks)
 TRUSTED_PROXIES = os.getenv("RELAY_TRUSTED_PROXIES", "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16")
 
 # Logging — no sensitive data
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+LOG_FORMAT = os.getenv("RELAY_LOG_FORMAT", "text")  # "text" or "json"
+
+if LOG_FORMAT == "json":
+    import json as _json
+
+    class _JsonFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            entry = {
+                "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+                "level": record.levelname,
+                "msg": record.getMessage(),
+            }
+            if record.exc_info and record.exc_info[0]:
+                entry["exc"] = self.formatException(record.exc_info)
+            return _json.dumps(entry, ensure_ascii=False)
+
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_JsonFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[_handler])
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
 log = logging.getLogger("relay")
 
 
@@ -283,7 +307,7 @@ class RelayServer:
 
             log.info("Room [%.8s…] paired — relaying", room_id)
 
-            # ── Step 4: relay ────────────────────────────────────────
+            # ── Step 4: relay with backpressure ──────────────────────
             msg_count = 0
             bytes_relayed = 0
             try:
@@ -301,6 +325,20 @@ class RelayServer:
                         await peer.send(message)
                     except Exception:
                         break
+                    # Backpressure: if peer's write buffer is too full, wait
+                    transport = getattr(peer, "transport", None)
+                    if transport is not None:
+                        buf_size = transport.get_write_buffer_size()
+                        if buf_size > BACKPRESSURE_HIGH:
+                            try:
+                                deadline = asyncio.get_event_loop().time() + BACKPRESSURE_TIMEOUT
+                                while transport.get_write_buffer_size() > BACKPRESSURE_LOW:
+                                    if asyncio.get_event_loop().time() > deadline:
+                                        log.warning("Backpressure timeout for room [%.8s…]", room_id)
+                                        break
+                                    await asyncio.sleep(0.05)
+                            except Exception:
+                                break
             except Exception:
                 pass
 

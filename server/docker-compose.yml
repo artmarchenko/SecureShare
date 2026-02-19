@@ -5,11 +5,31 @@ services:
     environment:
       - RELAY_HOST=0.0.0.0
       - RELAY_PORT=8765
+      - RELAY_HEALTH_PORT=8766
       - RELAY_MAX_CONN_PER_IP=50
       - RELAY_RATE_LIMIT=200
       - RELAY_ROOM_TIMEOUT=1800
     networks:
       - web
+    # Health check — Docker auto-restarts if unhealthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Resource limits — prevent OOM on Always Free VM (1 GB RAM)
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+    # Security hardening
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=10m
 
   caddy:
     image: caddy:2
@@ -23,6 +43,11 @@ services:
       - caddy_config:/config
     networks:
       - web
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
 
 volumes:
   caddy_data:
