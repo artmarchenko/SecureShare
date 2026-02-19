@@ -48,18 +48,15 @@ Oracle Cloud має свій firewall (Security List) ОКРІМ iptables на V
 ### Windows (PowerShell):
 
 ```powershell
-# Якщо завантажили .key файл з Oracle:
-ssh -i C:\Users\artma\Downloads\ssh-key-2026-02-19.key ubuntu@<PUBLIC_IP>
-
-# Або з Windows Terminal:
-ssh ubuntu@<PUBLIC_IP>
+# Replace <SSH_KEY_PATH> with path to your .key file from Oracle:
+ssh -i <SSH_KEY_PATH> ubuntu@<PUBLIC_IP>
 ```
 
 ### Якщо помилка Permission denied:
 
 ```powershell
-# Встановити правильні права на ключ (PowerShell):
-icacls "C:\Users\artma\Downloads\ssh-key-2026-02-19.key" /inheritance:r /grant:r "$($env:USERNAME):(R)"
+# Set correct permissions on the key file (PowerShell):
+icacls "<SSH_KEY_PATH>" /inheritance:r /grant:r "$($env:USERNAME):(R)"
 ```
 
 ## Крок 4: Налаштувати сервер
