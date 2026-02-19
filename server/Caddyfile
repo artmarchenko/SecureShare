@@ -5,11 +5,16 @@ secureshare-relay.duckdns.org {
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
         Referrer-Policy "no-referrer"
+        Content-Security-Policy "default-src 'none'"
         -Server
     }
 
-    # Health check endpoint (handled by Caddy, not forwarded)
-    handle /health {
+    # Health check endpoint (GET only, handled by Caddy)
+    @health_get {
+        method GET
+        path /health
+    }
+    handle @health_get {
         respond "ok" 200
     }
 
