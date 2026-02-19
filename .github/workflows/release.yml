@@ -1,0 +1,195 @@
+# ──────────────────────────────────────────────────────────────
+#  SecureShare Release Pipeline
+#
+#  Triggered by pushing a tag matching v* (e.g. v3.0.0).
+#
+#  1. Lint + import check (ubuntu, fast)
+#  2. Server tests against live VPS (ubuntu)
+#  3. Build .exe (windows-latest, PyInstaller)
+#  4. Create GitHub Release with .exe attached
+# ──────────────────────────────────────────────────────────────
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # needed to create releases
+
+jobs:
+  # ── Job 1: Lint ──────────────────────────────────────────────
+  lint:
+    name: Lint & Import Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-lint-${{ hashFiles('requirements.txt') }}
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install flake8
+
+      - name: Lint
+        run: |
+          flake8 app/ main.py build.py
+          flake8 server/relay_server.py
+
+      - name: Import check
+        run: |
+          python -c "
+          from app.config import APP_NAME, APP_VERSION, PROTOCOL_VERSION
+          from app.crypto_utils import CryptoSession
+          from app.ws_relay import VPSRelaySender, VPSRelayReceiver
+          print(f'{APP_NAME} v{APP_VERSION} proto={PROTOCOL_VERSION} — OK')
+          "
+
+  # ── Job 2: Server Tests ─────────────────────────────────────
+  server-tests:
+    name: Server Tests (live VPS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install websockets
+        run: pip install "websockets>=12.0,<17.0"
+
+      - name: Run server test suite
+        run: python server/test_relay.py
+
+  # ── Job 3: Build .exe ───────────────────────────────────────
+  build:
+    name: Build Windows .exe
+    runs-on: windows-latest
+    timeout-minutes: 15
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: pip-win-${{ hashFiles('requirements.txt') }}
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: python build.py
+
+      - name: Verify .exe
+        run: |
+          $exe = "dist\SecureShare.exe"
+          if (Test-Path $exe) {
+            $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+            $ver = (Get-Item $exe).VersionInfo.FileVersion
+            Write-Host "SecureShare.exe: $size MB, version $ver"
+          } else {
+            Write-Error ".exe not found!"
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Rename .exe with version
+        run: |
+          $tag = "${{ github.ref_name }}"
+          Copy-Item "dist\SecureShare.exe" "dist\SecureShare-$tag.exe"
+          Write-Host "Created SecureShare-$tag.exe"
+        shell: pwsh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureShare-exe
+          path: dist/SecureShare-*.exe
+          retention-days: 30
+
+  # ── Job 4: Create Release ───────────────────────────────────
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, server-tests]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for changelog
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SecureShare-exe
+          path: dist/
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          # Find previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log --oneline "$PREV_TAG..$TAG" -- . ':!.github')
+          else
+            CHANGES=$(git log --oneline "$TAG" -- . ':!.github' | head -20)
+          fi
+
+          {
+            echo "notes<<EOF"
+            echo "## SecureShare $TAG"
+            echo ""
+            echo "### Changes"
+            echo "$CHANGES" | sed 's/^/- /'
+            echo ""
+            echo "### Download"
+            echo "Download \`SecureShare-$TAG.exe\` below and run it — no installation needed."
+            echo ""
+            echo "### Requirements"
+            echo "- Windows 10/11 (64-bit)"
+            echo "- Internet connection"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SecureShare ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: false
+          files: dist/SecureShare-*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release summary
+        run: |
+          echo "## Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Asset:** SecureShare-${{ github.ref_name }}.exe" >> $GITHUB_STEP_SUMMARY
