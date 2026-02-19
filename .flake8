@@ -1,0 +1,21 @@
+[flake8]
+max-line-length = 140
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    venv,
+    .venv,
+    releases,
+    tools
+
+# Ignore specific rules:
+#   W503  - line break before binary operator (PEP8 changed stance)
+#   E221  - multiple spaces before operator (intentional alignment style)
+#   E203  - whitespace before ':' (common in slices, black-compatible)
+extend-ignore = W503, E221, E203
+
+per-file-ignores =
+    main.py:E402
+    app/ws_relay.py:E402

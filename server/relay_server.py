@@ -41,8 +41,9 @@ RATE_LIMIT_MAX = int(os.getenv("RELAY_RATE_LIMIT", "200"))  # connects per IP pe
 ROOM_TIMEOUT = int(os.getenv("RELAY_ROOM_TIMEOUT", "1800"))  # 30 min
 PEER_WAIT_TIMEOUT = 300             # 5 min waiting for second peer
 HANDSHAKE_TIMEOUT = 15              # seconds to send session code
-MAX_SESSION_BYTES = int(os.getenv("RELAY_MAX_SESSION_BYTES",
-                                   str(5 * 1024 * 1024 * 1024)))  # 5 GB per session
+MAX_SESSION_BYTES = int(os.getenv(
+    "RELAY_MAX_SESSION_BYTES", str(5 * 1024 * 1024 * 1024)
+))  # 5 GB per session
 BACKPRESSURE_HIGH = int(os.getenv("RELAY_BP_HIGH", str(4 * 1024 * 1024)))  # 4 MB — pause reading
 BACKPRESSURE_LOW = int(os.getenv("RELAY_BP_LOW", str(1 * 1024 * 1024)))    # 1 MB — resume reading
 BACKPRESSURE_TIMEOUT = 30  # seconds to wait before giving up
@@ -163,8 +164,9 @@ class RelayServer:
 
         health_server.close()
 
-    async def _health_handler(self, reader: asyncio.StreamReader,
-                               writer: asyncio.StreamWriter) -> None:
+    async def _health_handler(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         """Minimal HTTP health check — responds 200 OK with stats."""
         try:
             await reader.read(1024)  # consume request
@@ -475,6 +477,7 @@ def main():
         log.info("Interrupted — shutting down...")
     finally:
         loop.close()
+
 
 if __name__ == "__main__":
     main()
