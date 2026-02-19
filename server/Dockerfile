@@ -13,6 +13,6 @@ COPY relay_server.py .
 RUN useradd -r -s /bin/false relay
 USER relay
 
-EXPOSE 8765
+EXPOSE 8765 8766
 
 CMD ["python", "relay_server.py"]
