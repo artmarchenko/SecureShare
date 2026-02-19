@@ -5,11 +5,13 @@ Pairs two clients by session code and pipes raw bytes between them.
 All data is E2E encrypted — the server never inspects content.
 
 Security:
-  - Rate limiting per real client IP (X-Forwarded-For aware)
+  - Rate limiting per real client IP (X-Forwarded-For from trusted proxies only)
+  - Per-session data volume limit (default 5 GB)
   - Room timeout (auto-cleanup stale sessions)
   - Max 2 clients per room
   - Zero logging of session codes or payload
   - RAM only — no disk state
+  - Graceful shutdown (SIGTERM/SIGINT)
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import hashlib
 import ipaddress
 import logging
 import os
+import signal
 import time
 from collections import defaultdict
 
@@ -29,6 +32,7 @@ import websockets.server
 
 LISTEN_HOST = os.getenv("RELAY_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("RELAY_PORT", "8765"))
+HEALTH_PORT = int(os.getenv("RELAY_HEALTH_PORT", "8766"))
 
 # Security limits
 MAX_CONNECTIONS_PER_IP = int(os.getenv("RELAY_MAX_CONN_PER_IP", "50"))
@@ -37,6 +41,8 @@ RATE_LIMIT_MAX = int(os.getenv("RELAY_RATE_LIMIT", "200"))  # connects per IP pe
 ROOM_TIMEOUT = int(os.getenv("RELAY_ROOM_TIMEOUT", "1800"))  # 30 min
 PEER_WAIT_TIMEOUT = 300             # 5 min waiting for second peer
 HANDSHAKE_TIMEOUT = 15              # seconds to send session code
+MAX_SESSION_BYTES = int(os.getenv("RELAY_MAX_SESSION_BYTES",
+                                   str(5 * 1024 * 1024 * 1024)))  # 5 GB per session
 
 # Trusted proxy subnets (Docker internal networks)
 TRUSTED_PROXIES = os.getenv("RELAY_TRUSTED_PROXIES", "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16")
@@ -113,6 +119,12 @@ class RelayServer:
         asyncio.create_task(self._cleanup_loop())
         asyncio.create_task(self._stats_loop())
 
+        # Health check HTTP server (for Docker healthcheck / monitoring)
+        health_server = await asyncio.start_server(
+            self._health_handler, LISTEN_HOST, HEALTH_PORT,
+        )
+        log.info("Health check endpoint on :%d", HEALTH_PORT)
+
         async with websockets.serve(
             self._handler,
             LISTEN_HOST,
@@ -124,6 +136,29 @@ class RelayServer:
         ) as server:
             log.info("Relay server ready. Waiting for connections...")
             await server.wait_closed()
+
+        health_server.close()
+
+    async def _health_handler(self, reader: asyncio.StreamReader,
+                               writer: asyncio.StreamWriter) -> None:
+        """Minimal HTTP health check — responds 200 OK with stats."""
+        try:
+            await reader.read(1024)  # consume request
+            body = f'{{"status":"ok","active_rooms":{self._stats["active_rooms"]},"total_connections":{self._stats["total_connections"]}}}'
+            response = (
+                f"HTTP/1.1 200 OK\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                f"Connection: close\r\n"
+                f"\r\n"
+                f"{body}"
+            )
+            writer.write(response.encode())
+            await writer.drain()
+        except Exception:
+            pass
+        finally:
+            writer.close()
 
     def _is_trusted_proxy(self, ip: str) -> bool:
         """Check if the IP belongs to a trusted proxy network."""
@@ -250,9 +285,16 @@ class RelayServer:
 
             # ── Step 4: relay ────────────────────────────────────────
             msg_count = 0
+            bytes_relayed = 0
             try:
                 async for message in ws:
                     msg_count += 1
+                    msg_len = len(message) if isinstance(message, (bytes, bytearray)) else len(message.encode())
+                    bytes_relayed += msg_len
+                    if bytes_relayed > MAX_SESSION_BYTES:
+                        log.warning("Session data limit exceeded for room [%.8s…]: %d bytes", room_id, bytes_relayed)
+                        await ws.close(4003, "session data limit exceeded")
+                        break
                     if self._is_closed(peer):
                         break
                     try:
@@ -349,10 +391,52 @@ class RelayServer:
 
 def main():
     server = RelayServer()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # Graceful shutdown on SIGTERM / SIGINT
+    shutdown_event = asyncio.Event()
+
+    def _signal_handler():
+        log.info("Shutdown signal received — closing all connections...")
+        shutdown_event.set()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _signal_handler)
+        except NotImplementedError:
+            # Windows doesn't support add_signal_handler
+            pass
+
+    async def _run():
+        server_task = asyncio.create_task(server.start())
+        shutdown_task = asyncio.create_task(shutdown_event.wait())
+        done, pending = await asyncio.wait(
+            {server_task, shutdown_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # Cancel remaining tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        # Close all active rooms gracefully
+        for rid, room in list(server._rooms.items()):
+            for ws in list(room):
+                try:
+                    await ws.close(1001, "server shutting down")
+                except Exception:
+                    pass
+        log.info("Server stopped gracefully. Stats: %s", server._stats)
+
     try:
-        asyncio.run(server.start())
+        loop.run_until_complete(_run())
     except KeyboardInterrupt:
-        log.info("Shutting down...")
+        log.info("Interrupted — shutting down...")
+    finally:
+        loop.close()
 
 if __name__ == "__main__":
     main()
