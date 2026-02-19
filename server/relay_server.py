@@ -104,6 +104,7 @@ class RelayServer:
     def __init__(self):
         self._rooms: dict[str, list] = {}
         self._room_created: dict[str, float] = {}
+        self._room_events: dict[str, asyncio.Event] = {}  # signals when room is paired
         self._rate_limiter = RateLimiter()
         self._stats = {"total_connections": 0, "total_rooms": 0, "active_rooms": 0}
 
@@ -204,6 +205,7 @@ class RelayServer:
             if room_id not in self._rooms:
                 self._rooms[room_id] = []
                 self._room_created[room_id] = time.monotonic()
+                self._room_events[room_id] = asyncio.Event()
                 self._stats["total_rooms"] += 1
                 self._stats["active_rooms"] += 1
 
@@ -222,17 +224,23 @@ class RelayServer:
             room.append(ws)
             log.info("Peer joined room [%.8s…] (%d/2) from %s", room_id, len(room), ip)
 
-            # ── Step 3: wait for peer ────────────────────────────────
-            loop = asyncio.get_event_loop()
-            deadline = loop.time() + PEER_WAIT_TIMEOUT
+            # Signal the first peer if we're the second one
+            if len(room) == 2 and room_id in self._room_events:
+                self._room_events[room_id].set()
 
-            while len(room) < 2:
-                if loop.time() > deadline:
+            # ── Step 3: wait for peer (event-driven, no polling) ──
+            if len(room) < 2:
+                event = self._room_events.get(room_id)
+                if event is None:
+                    return
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=PEER_WAIT_TIMEOUT)
+                except asyncio.TimeoutError:
                     log.info("Peer wait timeout for room [%.8s…]", room_id)
                     return
+                # Check if we got disconnected while waiting
                 if self._is_closed(ws):
                     return
-                await asyncio.sleep(0.1)
 
             peer = next((w for w in room if w is not ws), None)
             if peer is None or self._is_closed(peer):
@@ -259,10 +267,22 @@ class RelayServer:
             if room_id:
                 self._cleanup_room(room_id, ws)
 
-    def _is_closed(self, ws) -> bool:
-        if hasattr(ws, "close_code"):
-            return ws.close_code is not None
-        return getattr(ws, "closed", False)
+    @staticmethod
+    def _is_closed(ws) -> bool:
+        """Check if WebSocket is closed. Works with websockets 12–16+."""
+        # websockets 13+: close_code is None while open, int when closed
+        close_code = getattr(ws, "close_code", None)
+        if close_code is not None:
+            return True
+        # websockets <13 fallback: .closed bool property
+        if getattr(ws, "closed", False):
+            return True
+        # Extra safety: check .state enum if available (websockets 10+)
+        state = getattr(ws, "state", None)
+        if state is not None:
+            # State.CLOSED = 3, State.CLOSING = 2
+            return getattr(state, "value", -1) >= 2
+        return False
 
     def _cleanup_room(self, room_id: str, ws) -> None:
         if room_id in self._rooms:
@@ -273,44 +293,56 @@ class RelayServer:
             if not self._rooms[room_id]:
                 del self._rooms[room_id]
                 self._room_created.pop(room_id, None)
+                self._room_events.pop(room_id, None)
                 self._stats["active_rooms"] = max(0, self._stats["active_rooms"] - 1)
                 log.info("Room [%.8s…] closed", room_id)
 
     async def _cleanup_loop(self) -> None:
         """Periodically remove stale rooms and clean rate limiter memory."""
         while True:
-            await asyncio.sleep(60)
-            # Clean rate limiter memory
-            cleaned_ips = self._rate_limiter.cleanup()
-            if cleaned_ips:
-                log.debug("Rate limiter: cleaned %d stale IPs", cleaned_ips)
-            now = time.monotonic()
-            stale = [
-                rid for rid, created in self._room_created.items()
-                if now - created > ROOM_TIMEOUT
-            ]
-            for rid in stale:
-                if rid in self._rooms:
-                    room = self._rooms[rid]
-                    # Close all connections in the room
-                    for ws in list(room):  # iterate over copy
-                        try:
-                            await ws.close(4002, "room timeout")
-                        except Exception:
-                            pass
-                    # In-place clear to keep reference integrity
-                    room.clear()
-                    # Now safe to remove the empty room
-                    del self._rooms[rid]
-                    self._room_created.pop(rid, None)
-                    self._stats["active_rooms"] = max(0, self._stats["active_rooms"] - 1)
-                    log.info("Stale room [%.8s…] cleaned up", rid)
+            try:
+                await asyncio.sleep(60)
+                # Clean rate limiter memory
+                cleaned_ips = self._rate_limiter.cleanup()
+                if cleaned_ips:
+                    log.debug("Rate limiter: cleaned %d stale IPs", cleaned_ips)
+                now = time.monotonic()
+                stale = [
+                    rid for rid, created in self._room_created.items()
+                    if now - created > ROOM_TIMEOUT
+                ]
+                for rid in stale:
+                    if rid in self._rooms:
+                        room = self._rooms[rid]
+                        # Close all connections in the room
+                        for ws in list(room):  # iterate over copy
+                            try:
+                                await ws.close(4002, "room timeout")
+                            except Exception:
+                                pass
+                        # In-place clear to keep reference integrity
+                        room.clear()
+                        # Now safe to remove the empty room
+                        del self._rooms[rid]
+                        self._room_created.pop(rid, None)
+                        self._room_events.pop(rid, None)
+                        self._stats["active_rooms"] = max(0, self._stats["active_rooms"] - 1)
+                        log.info("Stale room [%.8s…] cleaned up", rid)
+            except asyncio.CancelledError:
+                raise  # allow graceful shutdown
+            except Exception:
+                log.exception("Error in cleanup loop")
 
     async def _stats_loop(self) -> None:
         """Log stats every 5 minutes."""
         while True:
-            await asyncio.sleep(300)
-            log.info("Stats: %s", self._stats)
+            try:
+                await asyncio.sleep(300)
+                log.info("Stats: %s", self._stats)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Error in stats loop")
 
 
 # ── Entry point ──────────────────────────────────────────────────────
