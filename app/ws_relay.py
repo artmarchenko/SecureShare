@@ -8,8 +8,9 @@ The server pairs clients by session code and pipes raw bytes.
 All data is E2E encrypted — the server never inspects content.
 
 Protocol phases:
-  1. Key Exchange (signaling-encrypted with pre-shared key from session code)
-     Both sides send X25519 public key → derive shared AES-256 key.
+  1. Key Exchange + Version Negotiation (signaling-encrypted)
+     Both sides send X25519 public key + protocol_version + app_version.
+     If versions are incompatible → clear error message → abort.
   2. Verification (signaling-encrypted)
      Both sides confirm verification code matches (user interaction).
   3. File Transfer (E2E encrypted with derived key)
@@ -53,7 +54,13 @@ try:
 except ImportError:
     _HAS_WS = False
 
-from .config import VPS_RELAY_URL, VPS_CHUNK_SIZE
+from .config import (
+    VPS_RELAY_URL,
+    VPS_CHUNK_SIZE,
+    APP_VERSION,
+    PROTOCOL_VERSION,
+    MIN_PROTOCOL_VERSION,
+)
 from .crypto_utils import (
     CryptoSession,
     derive_signaling_key,
@@ -100,19 +107,29 @@ def _do_key_exchange(
     on_status: Optional[StatusCB],
 ) -> Optional[CryptoSession]:
     """
-    Perform X25519 key exchange over the WebSocket.
+    Perform X25519 key exchange over the WebSocket with version negotiation.
 
-    Both sides send their public key simultaneously (signaling-encrypted).
-    The VPS relay pipes A→B and B→A, so each side receives the other's key.
+    Both sides send their public key + protocol version simultaneously
+    (signaling-encrypted).  The VPS relay pipes A→B and B→A, so each
+    side receives the other's key.
+
+    Version check:
+      - If peer's protocol_version < our MIN_PROTOCOL_VERSION → reject
+      - If peer's protocol_version is missing → treat as version 0
 
     Returns CryptoSession with derived shared key, or None on failure.
     """
     crypto = CryptoSession(session_code)
     sig_key = derive_signaling_key(session_code)
 
-    # Send our public key
+    # Send our public key + version info
     pub_key_b64 = base64.b64encode(crypto.get_public_key_bytes()).decode()
-    sig_payload = json.dumps({"type": "pub_key", "key": pub_key_b64}).encode()
+    sig_payload = json.dumps({
+        "type":             "pub_key",
+        "key":              pub_key_b64,
+        "protocol_version": PROTOCOL_VERSION,
+        "app_version":      APP_VERSION,
+    }).encode()
     ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, sig_payload))
 
     if on_status:
@@ -143,6 +160,38 @@ def _do_key_exchange(
             on_status("❌ Невірне повідомлення обміну ключами")
         return None
 
+    # ── Version compatibility check ─────────────────────────────
+    peer_proto = peer_msg.get("protocol_version", 0)
+    peer_app   = peer_msg.get("app_version", "unknown")
+
+    log.info(
+        "Version negotiation: us=proto%d/app%s, peer=proto%d/app%s",
+        PROTOCOL_VERSION, APP_VERSION, peer_proto, peer_app,
+    )
+
+    if peer_proto < MIN_PROTOCOL_VERSION:
+        if on_status:
+            on_status(
+                f"❌ Несумісна версія партнера (протокол v{peer_proto}, "
+                f"потрібно v{MIN_PROTOCOL_VERSION}+). "
+                f"Попросіть партнера оновити програму."
+            )
+        return None
+
+    if PROTOCOL_VERSION < peer_proto:
+        # Peer requires a newer protocol — we might be too old
+        log.warning(
+            "Peer has newer protocol version (%d > %d). "
+            "Consider updating the app.",
+            peer_proto, PROTOCOL_VERSION,
+        )
+        if on_status:
+            on_status(
+                f"⚠️ Партнер має новішу версію (v{peer_app}). "
+                f"Рекомендуємо оновити програму."
+            )
+
+    # ── Derive shared key ───────────────────────────────────────
     peer_pub_key = base64.b64decode(peer_msg["key"])
     crypto.derive_shared_key(peer_pub_key)
 
