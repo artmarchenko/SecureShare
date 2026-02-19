@@ -2,7 +2,13 @@
 # Запускати після кожного rebuild:  .\sign.ps1
 
 $exePath  = "$PSScriptRoot\dist\SecureShare.exe"
-$certThumb = "AD2D7C0976DA576F4205D3FBCECA977A2246C416"
+# Set your certificate thumbprint here (from: Get-ChildItem Cert:\CurrentUser\My)
+$certThumb = $env:SECURESHARE_CERT_THUMBPRINT
+if (-not $certThumb) {
+    Write-Host "ERROR: Set SECURESHARE_CERT_THUMBPRINT environment variable"
+    Write-Host "  Example: `$env:SECURESHARE_CERT_THUMBPRINT = 'YOUR_THUMBPRINT'"
+    exit 1
+}
 
 $cert = Get-Item "Cert:\CurrentUser\My\$certThumb" -ErrorAction Stop
 
