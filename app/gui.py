@@ -15,6 +15,7 @@ import secrets
 import socket
 import ssl
 import string
+import sys
 import threading
 import time
 from pathlib import Path
@@ -112,12 +113,38 @@ class App(ctk.CTk):
         self.minsize(500, 660)
         self.resizable(True, True)
 
+        # ── Window icon ─────────────────────────────────────────────
+        self._set_window_icon()
+
         # State
         self._worker_thread: Optional[threading.Thread] = None
         self._cancel_flag = False
         self._current_transfer = None   # VPSRelaySender / VPSRelayReceiver
 
         self._build_ui()
+
+    # ── Window icon ──────────────────────────────────────────────
+
+    def _set_window_icon(self):
+        """Set the window/taskbar icon from bundled assets."""
+        try:
+            # PyInstaller bundled path
+            if getattr(sys, 'frozen', False):
+                base = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+            else:
+                base = Path(__file__).resolve().parent.parent
+
+            ico_path = base / "assets" / "SecureShare.ico"
+            png_path = base / "assets" / "icon_32.png"
+
+            if ico_path.exists():
+                self.iconbitmap(str(ico_path))
+            if png_path.exists():
+                from tkinter import PhotoImage
+                self._icon_photo = PhotoImage(file=str(png_path))
+                self.iconphoto(True, self._icon_photo)
+        except Exception as exc:
+            log.debug("Could not set window icon: %s", exc)
 
     # ── UI construction ────────────────────────────────────────────
 
