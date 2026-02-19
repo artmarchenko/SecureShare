@@ -118,18 +118,23 @@ jobs:
           }
         shell: pwsh
 
-      - name: Rename .exe with version
+      - name: Package with version
         run: |
           $tag = "${{ github.ref_name }}"
           Copy-Item "dist\SecureShare.exe" "dist\SecureShare-$tag.exe"
-          Write-Host "Created SecureShare-$tag.exe"
+          Compress-Archive -Path "dist\SecureShare.exe" -DestinationPath "dist\SecureShare-$tag.zip"
+          Compress-Archive -Path "dist\SecureShare.exe" -DestinationPath "dist\SecureShare.zip"
+          Write-Host "Created: SecureShare-$tag.exe, SecureShare-$tag.zip, SecureShare.zip"
         shell: pwsh
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SecureShare-exe
-          path: dist/SecureShare-*.exe
+          name: SecureShare-build
+          path: |
+            dist/SecureShare-*.exe
+            dist/SecureShare-*.zip
+            dist/SecureShare.zip
           retention-days: 30
 
   # ── Job 4: Create Release ───────────────────────────────────
@@ -146,7 +151,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: SecureShare-exe
+          name: SecureShare-build
           path: dist/
 
       - name: Generate release notes
@@ -169,7 +174,7 @@ jobs:
             echo "$CHANGES" | sed 's/^/- /'
             echo ""
             echo "### Download"
-            echo "Download \`SecureShare-$TAG.exe\` below and run it — no installation needed."
+            echo "Download \`SecureShare-$TAG.zip\`, extract and run — no installation needed."
             echo ""
             echo "### Requirements"
             echo "- Windows 10/11 (64-bit)"
@@ -185,7 +190,9 @@ jobs:
           body: ${{ steps.notes.outputs.notes }}
           draft: false
           prerelease: false
-          files: dist/SecureShare-*.exe
+          files: |
+            dist/SecureShare-${{ github.ref_name }}.zip
+            dist/SecureShare-${{ github.ref_name }}.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -193,7 +200,7 @@ jobs:
         run: |
           echo "## Release Created" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Asset:** SecureShare-${{ github.ref_name }}.exe" >> $GITHUB_STEP_SUMMARY
+          echo "**Assets:** SecureShare-${{ github.ref_name }}.zip + .exe" >> $GITHUB_STEP_SUMMARY
 
   # ── Job 5: Deploy Server to VPS ─────────────────────────────
   deploy:
@@ -215,7 +222,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: SecureShare-exe
+          name: SecureShare-build
           path: dist/
 
       - name: Copy server files to VPS
@@ -228,22 +235,22 @@ jobs:
             server/Caddyfile \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/home/${{ secrets.VPS_USER }}/secureshare-relay/
 
-      - name: Upload .exe to VPS for /download endpoint
+      - name: Upload app to VPS for /download endpoint
         run: |
           TAG="${{ github.ref_name }}"
           VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
           DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay/downloads"
 
-          # Copy versioned .exe
+          # Copy versioned .zip
           scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
-            dist/SecureShare-${TAG}.exe \
-            ${VPS}:${DEST}/SecureShare-${TAG}.exe
+            dist/SecureShare-${TAG}.zip \
+            ${VPS}:${DEST}/SecureShare-${TAG}.zip
 
-          # Create/overwrite SecureShare.exe as latest
+          # Create/overwrite SecureShare.zip as latest
           ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} \
-            "cp ${DEST}/SecureShare-${TAG}.exe ${DEST}/SecureShare.exe"
+            "cp ${DEST}/SecureShare-${TAG}.zip ${DEST}/SecureShare.zip"
 
-          echo "Uploaded: SecureShare-${TAG}.exe + SecureShare.exe (latest)"
+          echo "Uploaded: SecureShare-${TAG}.zip + SecureShare.zip (latest)"
 
       - name: Deploy with docker compose
         run: |
@@ -271,10 +278,9 @@ jobs:
           fi
 
           # Check download endpoint
-          TAG="${{ github.ref_name }}"
           DL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             --max-time 10 \
-            https://secureshare-relay.duckdns.org/download/SecureShare.exe)
+            https://secureshare-relay.duckdns.org/download/SecureShare.zip)
           echo "Download endpoint: HTTP $DL_STATUS"
           if [ "$DL_STATUS" = "200" ]; then
             echo "✅ Download endpoint OK"
@@ -291,4 +297,4 @@ jobs:
           echo "## Server Deploy" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Server:** Deployed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "**Download:** https://secureshare-relay.duckdns.org/download/SecureShare.exe" >> $GITHUB_STEP_SUMMARY
+          echo "**Download:** https://secureshare-relay.duckdns.org/download/SecureShare.zip" >> $GITHUB_STEP_SUMMARY
