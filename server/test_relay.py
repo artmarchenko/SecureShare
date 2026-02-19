@@ -85,14 +85,7 @@ def _run_pair(url: str, code: str, msg: bytes, send_delay: float = 2.0,
                 received[0] = data
             elif isinstance(data, str) and len(data) > 0:
                 received[0] = data.encode()
-            # Empty data = ignore, try again
-            if received[0] is None:
-                try:
-                    data2 = ws.recv()
-                    if isinstance(data2, bytes) and len(data2) > 0:
-                        received[0] = data2
-                except Exception:
-                    pass
+            # Empty data means server closed connection — don't treat as received
             ws.close()
         except Exception as e:
             errors.append(f"receiver: {e}")
@@ -355,21 +348,17 @@ class RelayTester:
             return TestResult("tls", False, error=str(e))
 
     def test_room_full(self) -> TestResult:
-        """Third client with same code should be rejected or wait indefinitely."""
+        """Third client connecting WHILE room is active should be rejected."""
         code = random_code()
-        msg = b"pair_test"
-        pair_ok = [False]
-        third_got_data = [False]
+        third_result = [None]  # "rejected", "timeout", "paired"
         errors = []
 
-        # First: pair two clients and verify relay works
+        # Client A and B pair and stay connected for 8 seconds
         def client_a():
             try:
                 ws = connect(self.url)
                 ws.send(code)
-                time.sleep(2)
-                ws.send_binary(msg)
-                time.sleep(2)
+                time.sleep(8)  # stay alive
                 ws.close()
             except Exception as e:
                 errors.append(f"a: {e}")
@@ -378,9 +367,7 @@ class RelayTester:
             try:
                 ws = connect(self.url)
                 ws.send(code)
-                data = ws.recv()
-                if data == msg:
-                    pair_ok[0] = True
+                time.sleep(8)  # stay alive
                 ws.close()
             except Exception as e:
                 errors.append(f"b: {e}")
@@ -388,55 +375,80 @@ class RelayTester:
         t1 = threading.Thread(target=client_a)
         t2 = threading.Thread(target=client_b)
         t1.start(); t2.start()
-        t1.join(TIMEOUT); t2.join(TIMEOUT)
 
-        if not pair_ok[0]:
-            return TestResult("room_full", False, error="Initial pair failed")
+        time.sleep(2)  # let A+B pair first
 
-        time.sleep(1)
-
-        # Now: try third client with same code — should not be paired
-        # (room was cleaned up, so a third client would need another peer)
+        # Third client tries to join the ACTIVE room
         def third_client():
             try:
                 ws3 = connect(self.url, timeout=5)
                 ws3.send(code)
-                # Wait for data — should timeout since there's no peer
-                data = ws3.recv()
-                third_got_data[0] = True
+                time.sleep(1)
+                # Try to send data — if paired, it would be forwarded
+                ws3.send_binary(b"intruder data")
+                try:
+                    data = ws3.recv()
+                    # Empty string = server closed connection (4001 room full)
+                    if data == "" or data == b"" or not data:
+                        third_result[0] = "rejected"
+                    else:
+                        third_result[0] = f"paired:{data!r}"
+                except Exception:
+                    third_result[0] = "rejected"
                 ws3.close()
-            except Exception:
-                pass  # timeout = expected
+            except websocket.WebSocketConnectionClosedException:
+                third_result[0] = "rejected"
+            except Exception as e:
+                if "4001" in str(e) or "Connection" in str(e) or "closed" in str(e).lower():
+                    third_result[0] = "rejected"
+                else:
+                    third_result[0] = f"error: {e}"
 
         t3 = threading.Thread(target=third_client)
         t3.start()
         t3.join(10)
+        t1.join(TIMEOUT); t2.join(TIMEOUT)
 
-        if third_got_data[0]:
-            return TestResult("room_full", False, error="Third client received data unexpectedly")
-        return TestResult("room_full", True, details="Third client couldn't pair (room was full/cleaned)")
+        if third_result[0] == "rejected":
+            return TestResult("room_full", True, details="Third client rejected by server")
+        if third_result[0] and third_result[0].startswith("paired:"):
+            return TestResult("room_full", False,
+                              error=f"Third client was PAIRED — room-full not enforced! Data: {third_result[0]}")
+        return TestResult("room_full", False, error=f"Unexpected: {third_result[0]}")
 
     def test_no_session_code(self) -> TestResult:
-        """Client that doesn't send session code should timeout after ~15s."""
+        """Client that doesn't send session code should be disconnected by server."""
         try:
             ws = connect(self.url, timeout=20)
             # Don't send session code — just wait
+            t0 = time.time()
             try:
                 data = ws.recv()
-                # If we get something (like a close frame), that's OK
-                return TestResult("no_session_code", True, details="Connection closed by server")
-            except Exception:
-                return TestResult("no_session_code", True, details="Disconnected after timeout")
-        except Exception:
-            return TestResult("no_session_code", True, details="Connection refused/closed")
+                elapsed = time.time() - t0
+                # Server should close the connection (recv returns empty or throws)
+                if data == "" or data == b"":
+                    return TestResult("no_session_code", True,
+                                      details=f"Server closed connection after {elapsed:.0f}s")
+                # Server sent actual data to a client with no session — BAD
+                return TestResult("no_session_code", False,
+                                  error=f"Server sent data to unauthenticated client: {data!r}")
+            except websocket.WebSocketConnectionClosedException:
+                elapsed = time.time() - t0
+                return TestResult("no_session_code", True,
+                                  details=f"Server closed connection after {elapsed:.0f}s")
+            except websocket.WebSocketTimeoutException:
+                return TestResult("no_session_code", False,
+                                  error="Server kept connection open for 20s+ without session code")
+        except Exception as e:
+            return TestResult("no_session_code", False, error=f"Unexpected: {e}")
 
     # ── 3. Reliability Tests ─────────────────────────────────────────
 
     def test_sudden_disconnect(self) -> TestResult:
-        """Sender disconnects abruptly — receiver eventually gets error or timeout."""
+        """Sender disconnects abruptly — receiver must get data AND then detect disconnect."""
         code = random_code()
         got_data = [False]
-        got_error = [False]
+        got_disconnect = [False]
         errors = []
 
         def sender():
@@ -446,23 +458,24 @@ class RelayTester:
                 time.sleep(2)
                 ws.send_binary(b"before crash")
                 time.sleep(0.5)
-                # Abrupt close — just kill the socket
+                # Abrupt close — kill the socket without close handshake
                 ws.sock.close()
             except Exception as e:
                 errors.append(f"sender: {e}")
 
         def receiver():
             try:
-                ws = connect(self.url, timeout=10)
+                ws = connect(self.url, timeout=15)
                 ws.send(code)
+                # Step 1: MUST receive the data that was sent before crash
+                data = ws.recv()
+                if data == b"before crash":
+                    got_data[0] = True
+                # Step 2: MUST detect that peer disconnected
                 try:
-                    data = ws.recv()  # should get "before crash"
-                    if data == b"before crash":
-                        got_data[0] = True
-                    # Try to read more — should eventually error
-                    ws.recv()
+                    ws.recv()  # should error or return empty
                 except Exception:
-                    got_error[0] = True
+                    got_disconnect[0] = True
                 try:
                     ws.close()
                 except Exception:
@@ -475,13 +488,15 @@ class RelayTester:
         t1.start(); t2.start()
         t1.join(TIMEOUT); t2.join(TIMEOUT)
 
-        if got_data[0] and got_error[0]:
-            return TestResult("sudden_disconnect", True, details="Got data + disconnect error")
-        if got_data[0]:
-            return TestResult("sudden_disconnect", True, details="Got data before disconnect")
-        if got_error[0]:
-            return TestResult("sudden_disconnect", True, details="Got disconnect error")
-        return TestResult("sudden_disconnect", False, error=f"No data or error received; errors={errors}")
+        if errors:
+            return TestResult("sudden_disconnect", False, error="; ".join(errors))
+        if got_data[0] and got_disconnect[0]:
+            return TestResult("sudden_disconnect", True, details="Data received + disconnect detected")
+        if got_data[0] and not got_disconnect[0]:
+            return TestResult("sudden_disconnect", False, error="Got data but didn't detect disconnect")
+        if not got_data[0] and got_disconnect[0]:
+            return TestResult("sudden_disconnect", False, error="Detected disconnect but data was lost")
+        return TestResult("sudden_disconnect", False, error="Neither data nor disconnect detected")
 
     def test_reconnect_same_code(self) -> TestResult:
         """After full session, same code can be reused."""
@@ -551,12 +566,14 @@ class RelayTester:
 
         if errors:
             return TestResult("throughput", False, error="; ".join(errors))
-        if t_end[0] > t_start[0] and total_received[0] > 0:
+        expected_bytes = chunk_size * n_chunks  # 10 MB
+        if t_end[0] > t_start[0] and total_received[0] >= expected_bytes * 0.95:
             duration = t_end[0] - t_start[0]
             mb = total_received[0] / (1024 * 1024)
             speed = mb / duration
             return TestResult("throughput", True, details=f"{mb:.1f} MB in {duration:.1f}s = {speed:.1f} MB/s")
-        return TestResult("throughput", False, error=f"Received {total_received[0]} bytes")
+        return TestResult("throughput", False,
+                          error=f"Received {total_received[0]} bytes, expected >= {int(expected_bytes * 0.95)}")
 
     def test_latency(self) -> TestResult:
         """Measure round-trip latency (ping-pong)."""
