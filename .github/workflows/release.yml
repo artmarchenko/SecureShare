@@ -212,6 +212,12 @@ jobs:
           chmod 600 ~/.ssh/vps_key
           ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SecureShare-exe
+          path: dist/
+
       - name: Copy server files to VPS
         run: |
           scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
@@ -221,6 +227,23 @@ jobs:
             server/docker-compose.yml \
             server/Caddyfile \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/home/${{ secrets.VPS_USER }}/secureshare-relay/
+
+      - name: Upload .exe to VPS for /download endpoint
+        run: |
+          TAG="${{ github.ref_name }}"
+          VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay/downloads"
+
+          # Copy versioned .exe
+          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            dist/SecureShare-${TAG}.exe \
+            ${VPS}:${DEST}/SecureShare-${TAG}.exe
+
+          # Create/overwrite SecureShare.exe as latest
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} \
+            "cp ${DEST}/SecureShare-${TAG}.exe ${DEST}/SecureShare.exe"
+
+          echo "Uploaded: SecureShare-${TAG}.exe + SecureShare.exe (latest)"
 
       - name: Deploy with docker compose
         run: |
@@ -235,14 +258,28 @@ jobs:
         run: |
           echo "Waiting for server to be ready..."
           sleep 10
+
+          # Check WebSocket endpoint
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             --max-time 10 \
             https://secureshare-relay.duckdns.org)
-          echo "Health check HTTP status: $STATUS"
+          echo "WebSocket endpoint: HTTP $STATUS"
           if [ "$STATUS" = "200" ] || [ "$STATUS" = "101" ] || [ "$STATUS" = "426" ]; then
             echo "✅ Server is UP"
           else
             echo "⚠️ Unexpected status: $STATUS (server may still be starting)"
+          fi
+
+          # Check download endpoint
+          TAG="${{ github.ref_name }}"
+          DL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            https://secureshare-relay.duckdns.org/download/SecureShare.exe)
+          echo "Download endpoint: HTTP $DL_STATUS"
+          if [ "$DL_STATUS" = "200" ]; then
+            echo "✅ Download endpoint OK"
+          else
+            echo "⚠️ Download returned: $DL_STATUS"
           fi
 
       - name: Cleanup SSH key
@@ -252,6 +289,6 @@ jobs:
       - name: Deploy summary
         run: |
           echo "## Server Deploy" >> $GITHUB_STEP_SUMMARY
-          echo "**Host:** ${{ secrets.VPS_HOST }}" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** Deployed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Server:** Deployed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Download:** https://secureshare-relay.duckdns.org/download/SecureShare.exe" >> $GITHUB_STEP_SUMMARY
