@@ -277,9 +277,9 @@ jobs:
             echo "⚠️ Unexpected status: $STATUS (server may still be starting)"
           fi
 
-          # Check download endpoint
+          # Check download endpoint (HEAD to avoid downloading full file)
           DL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            --max-time 10 \
+            --head --max-time 10 \
             https://secureshare-relay.duckdns.org/download/SecureShare.zip)
           echo "Download endpoint: HTTP $DL_STATUS"
           if [ "$DL_STATUS" = "200" ]; then
