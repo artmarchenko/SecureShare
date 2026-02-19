@@ -7,6 +7,7 @@
 #  2. Server tests against live VPS (ubuntu)
 #  3. Build .exe (windows-latest, PyInstaller)
 #  4. Create GitHub Release with .exe attached
+#  5. Deploy server to VPS (scp + docker compose)
 # ──────────────────────────────────────────────────────────────
 
 name: Release
@@ -193,3 +194,64 @@ jobs:
           echo "## Release Created" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Asset:** SecureShare-${{ github.ref_name }}.exe" >> $GITHUB_STEP_SUMMARY
+
+  # ── Job 5: Deploy Server to VPS ─────────────────────────────
+  deploy:
+    name: Deploy Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [release]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copy server files to VPS
+        run: |
+          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            server/relay_server.py \
+            server/requirements.txt \
+            server/Dockerfile \
+            server/docker-compose.yml \
+            server/Caddyfile \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/home/${{ secrets.VPS_USER }}/secureshare-relay/
+
+      - name: Deploy with docker compose
+        run: |
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cd /home/\$(whoami)/secureshare-relay && \
+             docker compose up -d --build --remove-orphans && \
+             sleep 5 && \
+             docker compose ps"
+
+      - name: Health check
+        run: |
+          echo "Waiting for server to be ready..."
+          sleep 10
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            https://secureshare-relay.duckdns.org)
+          echo "Health check HTTP status: $STATUS"
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "101" ] || [ "$STATUS" = "426" ]; then
+            echo "✅ Server is UP"
+          else
+            echo "⚠️ Unexpected status: $STATUS (server may still be starting)"
+          fi
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/vps_key
+
+      - name: Deploy summary
+        run: |
+          echo "## Server Deploy" >> $GITHUB_STEP_SUMMARY
+          echo "**Host:** ${{ secrets.VPS_HOST }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Deployed ✅" >> $GITHUB_STEP_SUMMARY
