@@ -257,7 +257,7 @@ jobs:
           ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "cd /home/\$(whoami)/secureshare-relay && \
-             docker compose up -d --build --remove-orphans && \
+             docker compose up -d --build --force-recreate --remove-orphans && \
              sleep 5 && \
              docker compose ps"
 
