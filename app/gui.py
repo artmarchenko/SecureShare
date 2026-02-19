@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 import secrets
 import socket
 import ssl
 import string
-import sys
 import threading
 import time
 from pathlib import Path
@@ -643,8 +641,8 @@ class App(ctk.CTk):
                 socket.create_connection(("8.8.8.8", 53), timeout=5).close()
                 _update_row("internet", True, "Підключено")
                 passed += 1
-            except Exception as e:
-                _update_row("internet", False, f"Немає з'єднання")
+            except Exception:
+                _update_row("internet", False, "Немає з'єднання")
                 # If no internet, mark all remaining as failed
                 for key in ["dns", "tls", "websocket", "latency"]:
                     _update_row(key, False, "Пропущено (немає інтернету)",
@@ -689,13 +687,12 @@ class App(ctk.CTk):
                         _update_row("tls", True,
                                     f"{issuer} (до {not_after})")
                         passed += 1
-            except ssl.SSLCertVerificationError as e:
+            except ssl.SSLCertVerificationError:
                 _update_row("tls", False, "Невалідний сертифікат")
-            except Exception as e:
-                _update_row("tls", False, f"Помилка: {type(e).__name__}")
+            except Exception as exc:
+                _update_row("tls", False, f"Помилка: {type(exc).__name__}")
 
             # 4. WebSocket connection
-            ws_ok = False
             try:
                 import websockets.sync.client as wsc
                 t0 = time.perf_counter()
@@ -708,7 +705,6 @@ class App(ctk.CTk):
                 ws.close()
                 _update_row("websocket", True, f"OK  ({ws_ms:.0f} мс)")
                 passed += 1
-                ws_ok = True
             except Exception:
                 # Try plain HTTPS health check as fallback
                 try:
@@ -723,13 +719,12 @@ class App(ctk.CTk):
                         _update_row("websocket", True,
                                     f"OK (HTTP, {ws_ms:.0f} мс)")
                         passed += 1
-                        ws_ok = True
                     else:
                         _update_row("websocket", False,
                                     f"HTTP {resp.status}")
-                except Exception as e2:
+                except Exception:
                     _update_row("websocket", False,
-                                f"Не вдалося підключитися")
+                                "Не вдалося підключитися")
 
             # 5. Latency (3 TCP pings, take median)
             try:
@@ -743,7 +738,6 @@ class App(ctk.CTk):
                     time.sleep(0.1)
                 pings.sort()
                 median = pings[len(pings) // 2]
-                avg = sum(pings) / len(pings)
                 if median < 100:
                     quality = "Відмінно"
                     clr = "#2ecc71"
@@ -922,6 +916,7 @@ class App(ctk.CTk):
         label_text, color = self._STATE_LABELS.get(
             state, ("⚪  Готовий", "gray")
         )
+
         def _do():
             self.status_indicator.configure(text=label_text, text_color=color)
         self.after(0, _do)
@@ -933,6 +928,7 @@ class App(ctk.CTk):
         line = f"{ts} {text}\n"
         # Duplicate to Python logger so it goes to console + log file
         log.info("[GUI] %s", text)
+
         def _do():
             self.status_box.configure(state="normal")
             self.status_box.insert("end", line)
@@ -957,6 +953,7 @@ class App(ctk.CTk):
     def _set_buttons(self, enabled: bool):
         state = "normal" if enabled else "disabled"
         cancel_state = "disabled" if enabled else "normal"
+
         def _do():
             self.send_btn.configure(state=state)
             self.recv_btn.configure(state=state)
@@ -1002,7 +999,7 @@ class App(ctk.CTk):
             dialog.update_idletasks()
             x = self.winfo_x() + (self.winfo_width() - 440) // 2
             y = self.winfo_y() + (self.winfo_height() - 320) // 2
-            dialog.geometry(f"+{max(0,x)}+{max(0,y)}")
+            dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
 
             ctk.CTkLabel(
                 dialog,
