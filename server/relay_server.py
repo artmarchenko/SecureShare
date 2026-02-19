@@ -1,0 +1,251 @@
+"""
+SecureShare Relay Server — production WebSocket relay.
+
+Pairs two clients by session code and pipes raw bytes between them.
+All data is E2E encrypted — the server never inspects content.
+
+Security:
+  - Rate limiting per IP (max connections per minute)
+  - Room timeout (auto-cleanup stale sessions)
+  - Max 2 clients per room
+  - Zero logging of session codes or payload
+  - RAM only — no disk state
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import logging
+import os
+import time
+from collections import defaultdict
+from typing import Optional
+
+import websockets
+import websockets.server
+
+# ── Configuration (env vars or defaults) ─────────────────────────────
+
+LISTEN_HOST = os.getenv("RELAY_HOST", "0.0.0.0")
+LISTEN_PORT = int(os.getenv("RELAY_PORT", "8765"))
+
+# Security limits
+MAX_CONNECTIONS_PER_IP = int(os.getenv("RELAY_MAX_CONN_PER_IP", "10"))
+RATE_LIMIT_WINDOW = 60              # seconds
+RATE_LIMIT_MAX = int(os.getenv("RELAY_RATE_LIMIT", "20"))  # connects per IP per window
+ROOM_TIMEOUT = int(os.getenv("RELAY_ROOM_TIMEOUT", "1800"))  # 30 min
+PEER_WAIT_TIMEOUT = 300             # 5 min waiting for second peer
+HANDSHAKE_TIMEOUT = 15              # seconds to send session code
+
+# Logging — no sensitive data
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("relay")
+
+
+# ── Rate limiter ─────────────────────────────────────────────────────
+
+class RateLimiter:
+    """Simple sliding-window rate limiter per IP."""
+
+    def __init__(self):
+        self._attempts: dict[str, list[float]] = defaultdict(list)
+        self._connections: dict[str, int] = defaultdict(int)
+
+    def check(self, ip: str) -> bool:
+        """Return True if the connection is allowed."""
+        now = time.monotonic()
+        # Clean old entries
+        self._attempts[ip] = [t for t in self._attempts[ip] if now - t < RATE_LIMIT_WINDOW]
+        # Check rate
+        if len(self._attempts[ip]) >= RATE_LIMIT_MAX:
+            return False
+        # Check concurrent connections
+        if self._connections[ip] >= MAX_CONNECTIONS_PER_IP:
+            return False
+        self._attempts[ip].append(now)
+        return True
+
+    def connect(self, ip: str) -> None:
+        self._connections[ip] = self._connections.get(ip, 0) + 1
+
+    def disconnect(self, ip: str) -> None:
+        self._connections[ip] = max(0, self._connections.get(ip, 1) - 1)
+        if self._connections[ip] == 0:
+            self._connections.pop(ip, None)
+
+
+# ── Relay Server ─────────────────────────────────────────────────────
+
+class RelayServer:
+    def __init__(self):
+        self._rooms: dict[str, list] = {}
+        self._room_created: dict[str, float] = {}
+        self._rate_limiter = RateLimiter()
+        self._stats = {"total_connections": 0, "total_rooms": 0, "active_rooms": 0}
+
+    async def start(self) -> None:
+        log.info("SecureShare Relay Server starting on %s:%d", LISTEN_HOST, LISTEN_PORT)
+        # Periodic cleanup task
+        asyncio.create_task(self._cleanup_loop())
+        async with websockets.serve(
+            self._handler,
+            LISTEN_HOST,
+            LISTEN_PORT,
+            max_size=2 * 1024 * 1024,        # 2 MB max frame (512KB chunk + encryption overhead)
+            ping_interval=30,
+            ping_timeout=120,
+            close_timeout=10,
+        ) as server:
+            log.info("Relay server ready. Waiting for connections...")
+            await server.wait_closed()
+
+    async def _handler(self, ws) -> None:
+        """Handle a single WebSocket connection."""
+        # Get client IP
+        ip = ws.remote_address[0] if ws.remote_address else "unknown"
+
+        # Rate limiting
+        if not self._rate_limiter.check(ip):
+            log.warning("Rate limit exceeded for %s", ip)
+            await ws.close(4029, "rate limit exceeded")
+            return
+
+        self._rate_limiter.connect(ip)
+        self._stats["total_connections"] += 1
+        room_id = None
+
+        try:
+            # ── Step 1: receive session code ─────────────────────────
+            try:
+                code = await asyncio.wait_for(ws.recv(), timeout=HANDSHAKE_TIMEOUT)
+            except (asyncio.TimeoutError, Exception):
+                return
+
+            if not isinstance(code, str):
+                code = code.decode("utf-8", errors="replace")
+
+            # Hash the session code — don't store original in memory
+            room_id = hashlib.sha256(code.encode()).hexdigest()[:32]
+
+            # ── Step 2: join room ────────────────────────────────────
+            if room_id not in self._rooms:
+                self._rooms[room_id] = []
+                self._room_created[room_id] = time.monotonic()
+                self._stats["total_rooms"] += 1
+                self._stats["active_rooms"] += 1
+
+            room = self._rooms[room_id]
+
+            if len(room) >= 2:
+                log.warning("Room full, rejecting connection")
+                await ws.close(4001, "room full")
+                return
+
+            room.append(ws)
+            log.info("Peer joined room [%.8s…] (%d/2) from %s", room_id, len(room), ip)
+
+            # ── Step 3: wait for peer ────────────────────────────────
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + PEER_WAIT_TIMEOUT
+
+            while len(room) < 2:
+                if loop.time() > deadline:
+                    log.info("Peer wait timeout for room [%.8s…]", room_id)
+                    return
+                if self._is_closed(ws):
+                    return
+                await asyncio.sleep(0.1)
+
+            peer = next((w for w in room if w is not ws), None)
+            if peer is None:
+                return
+
+            log.info("Room [%.8s…] paired — relaying", room_id)
+
+            # ── Step 4: relay ────────────────────────────────────────
+            try:
+                async for message in ws:
+                    if self._is_closed(peer):
+                        break
+                    try:
+                        await peer.send(message)
+                    except Exception:
+                        break
+            except Exception:
+                pass
+
+        finally:
+            self._rate_limiter.disconnect(ip)
+            if room_id:
+                self._cleanup_room(room_id, ws)
+
+    def _is_closed(self, ws) -> bool:
+        if hasattr(ws, "close_code"):
+            return ws.close_code is not None
+        return getattr(ws, "closed", False)
+
+    def _cleanup_room(self, room_id: str, ws) -> None:
+        if room_id in self._rooms:
+            try:
+                self._rooms[room_id].remove(ws)
+            except ValueError:
+                pass
+            if not self._rooms[room_id]:
+                del self._rooms[room_id]
+                self._room_created.pop(room_id, None)
+                self._stats["active_rooms"] = max(0, self._stats["active_rooms"] - 1)
+                log.info("Room [%.8s…] closed", room_id)
+
+    async def _cleanup_loop(self) -> None:
+        """Periodically remove stale rooms."""
+        while True:
+            await asyncio.sleep(60)
+            now = time.monotonic()
+            stale = [
+                rid for rid, created in self._room_created.items()
+                if now - created > ROOM_TIMEOUT
+            ]
+            for rid in stale:
+                if rid in self._rooms:
+                    for ws in self._rooms[rid]:
+                        try:
+                            await ws.close(4002, "room timeout")
+                        except Exception:
+                            pass
+                    del self._rooms[rid]
+                    self._room_created.pop(rid, None)
+                    self._stats["active_rooms"] = max(0, self._stats["active_rooms"] - 1)
+                    log.info("Stale room [%.8s…] cleaned up", rid)
+
+            if stale:
+                log.info("Stats: %s", self._stats)
+
+
+# ── Health check endpoint (optional, for monitoring) ─────────────────
+
+async def health_handler(ws):
+    """Simple health check — responds to 'ping' with 'pong'."""
+    try:
+        msg = await asyncio.wait_for(ws.recv(), timeout=5)
+        if msg == "health":
+            await ws.send("ok")
+    except Exception:
+        pass
+
+
+# ── Entry point ──────────────────────────────────────────────────────
+
+def main():
+    server = RelayServer()
+    try:
+        asyncio.run(server.start())
+    except KeyboardInterrupt:
+        log.info("Shutting down...")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,6 @@
+# Замінити YOUR_DOMAIN на свій домен, наприклад:
+# relay.secureshare.xyz
+
+YOUR_DOMAIN {
+    reverse_proxy relay:8765
+}
