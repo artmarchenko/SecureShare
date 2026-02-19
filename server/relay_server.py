@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import logging
 import os
 import time
@@ -37,6 +38,9 @@ ROOM_TIMEOUT = int(os.getenv("RELAY_ROOM_TIMEOUT", "1800"))  # 30 min
 PEER_WAIT_TIMEOUT = 300             # 5 min waiting for second peer
 HANDSHAKE_TIMEOUT = 15              # seconds to send session code
 
+# Trusted proxy subnets (Docker internal networks)
+TRUSTED_PROXIES = os.getenv("RELAY_TRUSTED_PROXIES", "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16")
+
 # Logging — no sensitive data
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +53,7 @@ log = logging.getLogger("relay")
 # ── Rate limiter ─────────────────────────────────────────────────────
 
 class RateLimiter:
-    """Simple sliding-window rate limiter per IP."""
+    """Sliding-window rate limiter per IP with periodic memory cleanup."""
 
     def __init__(self):
         self._attempts: dict[str, list[float]] = defaultdict(list)
@@ -58,7 +62,7 @@ class RateLimiter:
     def check(self, ip: str) -> bool:
         """Return True if the connection is allowed."""
         now = time.monotonic()
-        # Clean old entries
+        # Clean old entries for this IP
         self._attempts[ip] = [t for t in self._attempts[ip] if now - t < RATE_LIMIT_WINDOW]
         # Check rate
         if len(self._attempts[ip]) >= RATE_LIMIT_MAX:
@@ -76,6 +80,22 @@ class RateLimiter:
         self._connections[ip] = max(0, self._connections.get(ip, 1) - 1)
         if self._connections[ip] == 0:
             self._connections.pop(ip, None)
+
+    def cleanup(self) -> int:
+        """Remove stale IPs with no recent attempts and no active connections.
+        Returns number of IPs cleaned."""
+        now = time.monotonic()
+        stale_ips = []
+        for ip, timestamps in list(self._attempts.items()):
+            # Remove expired timestamps
+            fresh = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
+            if not fresh and self._connections.get(ip, 0) == 0:
+                stale_ips.append(ip)
+            else:
+                self._attempts[ip] = fresh
+        for ip in stale_ips:
+            del self._attempts[ip]
+        return len(stale_ips)
 
 
 # ── Relay Server ─────────────────────────────────────────────────────
@@ -104,13 +124,25 @@ class RelayServer:
             log.info("Relay server ready. Waiting for connections...")
             await server.wait_closed()
 
-    def _get_client_ip(self, ws) -> str:
-        """Get real client IP from X-Forwarded-For header or direct connection."""
+    def _is_trusted_proxy(self, ip: str) -> bool:
+        """Check if the IP belongs to a trusted proxy network."""
+        try:
+            addr = ipaddress.ip_address(ip)
+            for subnet_str in TRUSTED_PROXIES.split(","):
+                subnet_str = subnet_str.strip()
+                if subnet_str and addr in ipaddress.ip_network(subnet_str, strict=False):
+                    return True
+        except (ValueError, TypeError):
+            pass
+        return False
+
+    def _get_xff_header(self, ws) -> str:
+        """Extract X-Forwarded-For header from WebSocket request."""
         try:
             # websockets 13+: ws.request.headers
-            headers = getattr(ws, "request", None)
-            if headers and hasattr(headers, "headers"):
-                xff = headers.headers.get("X-Forwarded-For", "")
+            req = getattr(ws, "request", None)
+            if req and hasattr(req, "headers"):
+                xff = req.headers.get("X-Forwarded-For", "")
                 if xff:
                     return xff.split(",")[0].strip()
             # websockets <13: ws.request_headers
@@ -121,10 +153,22 @@ class RelayServer:
                     return xff.split(",")[0].strip()
         except Exception:
             pass
-        # Fallback to direct IP
+        return ""
+
+    def _get_client_ip(self, ws) -> str:
+        """Get real client IP. Trust X-Forwarded-For ONLY from trusted proxies."""
+        direct_ip = ""
         if ws.remote_address:
-            return ws.remote_address[0]
-        return "unknown"
+            direct_ip = ws.remote_address[0]
+
+        # Only trust XFF header if the direct connection is from a trusted proxy (e.g. Caddy)
+        if direct_ip and self._is_trusted_proxy(direct_ip):
+            xff_ip = self._get_xff_header(ws)
+            if xff_ip:
+                return xff_ip
+
+        # Direct connection or untrusted proxy — use direct IP
+        return direct_ip or "unknown"
 
     async def _handler(self, ws) -> None:
         """Handle a single WebSocket connection."""
@@ -233,9 +277,13 @@ class RelayServer:
                 log.info("Room [%.8s…] closed", room_id)
 
     async def _cleanup_loop(self) -> None:
-        """Periodically remove stale rooms."""
+        """Periodically remove stale rooms and clean rate limiter memory."""
         while True:
             await asyncio.sleep(60)
+            # Clean rate limiter memory
+            cleaned_ips = self._rate_limiter.cleanup()
+            if cleaned_ips:
+                log.debug("Rate limiter: cleaned %d stale IPs", cleaned_ips)
             now = time.monotonic()
             stale = [
                 rid for rid, created in self._room_created.items()
@@ -243,11 +291,16 @@ class RelayServer:
             ]
             for rid in stale:
                 if rid in self._rooms:
-                    for ws in self._rooms[rid]:
+                    room = self._rooms[rid]
+                    # Close all connections in the room
+                    for ws in list(room):  # iterate over copy
                         try:
                             await ws.close(4002, "room timeout")
                         except Exception:
                             pass
+                    # In-place clear to keep reference integrity
+                    room.clear()
+                    # Now safe to remove the empty room
                     del self._rooms[rid]
                     self._room_created.pop(rid, None)
                     self._stats["active_rooms"] = max(0, self._stats["active_rooms"] - 1)

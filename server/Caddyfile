@@ -1,3 +1,21 @@
 secureshare-relay.duckdns.org {
-    reverse_proxy relay:8765
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+
+    # Health check endpoint (handled by Caddy, not forwarded)
+    handle /health {
+        respond "ok" 200
+    }
+
+    # WebSocket relay — pass real client IP
+    reverse_proxy relay:8765 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+    }
 }
