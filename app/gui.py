@@ -2,28 +2,27 @@
 SecureShare — CustomTkinter GUI.
 
 Single-window application with Send / Receive modes,
-progress bar, and status log.
+progress bar, status log, and verification popup.
 
-v2: mandatory verification popup to detect MITM attacks.
+v3: VPS-only relay, simplified architecture, improved UX.
 """
 
 from __future__ import annotations
 
-import base64
-import json
+import datetime
 import logging
 import os
-import random
 import secrets
 import socket
+import ssl
 import string
-import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Optional
+from urllib.parse import urlparse
 
 import customtkinter as ctk
 
@@ -31,27 +30,10 @@ from .config import (
     APP_NAME,
     APP_VERSION,
     SESSION_CODE_LENGTH,
-    CONNECTION_TIMEOUT,
-    TCP_CHUNK_SIZE,
+    VPS_MAX_FILE_SIZE,
+    VPS_RELAY_URL,
 )
-from .crypto_utils import CryptoSession
-from .network import (
-    get_local_ips,
-    stun_request,
-    upnp_add_mapping,
-    upnp_remove_mapping,
-    upnp_get_external_ip,
-    udp_hole_punch,
-    tcp_listen,
-    tcp_connect,
-    tcp_connect_any,
-)
-from .signaling import SignalingClient
-from .transfer import TCPSender, TCPReceiver, UDPSender, UDPReceiver
-from .relay import MQTTRelaySender, MQTTRelayReceiver
-from .relay_server import LocalRelayServer
-from .cf_tunnel import CloudflareTunnel
-from .ws_relay import WSRelaySender, WSRelayReceiver
+from .ws_relay import VPSRelaySender, VPSRelayReceiver
 
 log = logging.getLogger(__name__)
 
@@ -90,137 +72,195 @@ def _human_eta(seconds: float) -> str:
     return f"{s}с"
 
 
+def _timestamp() -> str:
+    """Current time as [HH:MM:SS] prefix for log lines."""
+    return datetime.datetime.now().strftime("[%H:%M:%S]")
+
+
 # ════════════════════════════════════════════════════════════════════
 #  Main application window
 # ════════════════════════════════════════════════════════════════════
 
 class App(ctk.CTk):
     WIDTH = 580
-    HEIGHT = 640
+    HEIGHT = 700
+
+    # Connection states
+    STATE_IDLE = "idle"
+    STATE_CONNECTING = "connecting"
+    STATE_WAITING = "waiting"
+    STATE_KEY_EXCHANGE = "key_exchange"
+    STATE_VERIFYING = "verifying"
+    STATE_TRANSFERRING = "transferring"
+    STATE_DONE = "done"
+    STATE_ERROR = "error"
+
+    _STATE_LABELS = {
+        STATE_IDLE:         ("⚪  Готовий", "gray"),
+        STATE_CONNECTING:   ("🟡  Підключення...", "#f39c12"),
+        STATE_WAITING:      ("🟡  Очікування партнера...", "#f39c12"),
+        STATE_KEY_EXCHANGE: ("🟡  Обмін ключами...", "#f39c12"),
+        STATE_VERIFYING:    ("🟠  Верифікація...", "#e67e22"),
+        STATE_TRANSFERRING: ("🟢  Передача...", "#2ecc71"),
+        STATE_DONE:         ("🟢  Завершено ✓", "#27ae60"),
+        STATE_ERROR:        ("🔴  Помилка", "#e74c3c"),
+    }
 
     def __init__(self):
         super().__init__()
 
         self.title(f"{APP_NAME} v{APP_VERSION}")
         self.geometry(f"{self.WIDTH}x{self.HEIGHT}")
-        self.minsize(500, 580)
+        self.minsize(500, 660)
         self.resizable(True, True)
 
         # State
         self._worker_thread: Optional[threading.Thread] = None
         self._cancel_flag = False
-        self._upnp_port: Optional[int] = None
-        self._current_transfer = None  # TCPSender / TCPReceiver / etc.
-
-        # Add Windows Firewall exception silently so the popup never appears
-        threading.Thread(
-            target=self._ensure_firewall_exception,
-            daemon=True,
-        ).start()
+        self._current_transfer = None   # VPSRelaySender / VPSRelayReceiver
 
         self._build_ui()
-
-    @staticmethod
-    def _ensure_firewall_exception() -> None:
-        """
-        Register SecureShare.exe in Windows Firewall (inbound allow) so that
-        Windows never shows the 'allow/block' popup when the local relay server
-        binds a port.  Requires no elevation — netsh can add rules for the
-        current user's program without admin rights on most Windows configs.
-        """
-        if os.name != "nt":
-            return
-        try:
-            exe = sys.executable
-            # When running as a PyInstaller bundle, sys.executable IS the .exe
-            rule_name = "SecureShare"
-            # Check whether the rule already exists
-            check = subprocess.run(
-                ["netsh", "advfirewall", "firewall", "show", "rule",
-                 f"name={rule_name}"],
-                capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            if "No rules match" in check.stdout or check.returncode != 0:
-                subprocess.run(
-                    ["netsh", "advfirewall", "firewall", "add", "rule",
-                     f"name={rule_name}",
-                     "dir=in", "action=allow",
-                     f"program={exe}",
-                     "enable=yes", "profile=any"],
-                    capture_output=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-        except Exception:
-            pass   # silently ignore — transfer still works, just popup may appear
 
     # ── UI construction ────────────────────────────────────────────
 
     def _build_ui(self):
         # Title
         title_frame = ctk.CTkFrame(self, fg_color="transparent")
-        title_frame.pack(fill="x", padx=20, pady=(18, 0))
+        title_frame.pack(fill="x", padx=20, pady=(12, 0))
         ctk.CTkLabel(
             title_frame,
-            text=f"\U0001f512 {APP_NAME}",
-            font=ctk.CTkFont(size=26, weight="bold"),
+            text=f"🔒 {APP_NAME}",
+            font=ctk.CTkFont(size=24, weight="bold"),
         ).pack(side="left")
         ctk.CTkLabel(
             title_frame,
             text=f"v{APP_VERSION}",
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(size=11),
             text_color="gray",
-        ).pack(side="left", padx=(8, 0), pady=(8, 0))
+        ).pack(side="left", padx=(8, 0), pady=(6, 0))
+
+        # Help button (top-right)
+        ctk.CTkButton(
+            title_frame,
+            text="❓ Довідка",
+            width=96,
+            height=30,
+            font=ctk.CTkFont(size=12),
+            fg_color="#3a3a3a",
+            hover_color="#4a4a4a",
+            border_width=1,
+            border_color="#555555",
+            corner_radius=8,
+            command=self._show_help,
+        ).pack(side="right")
+
+        # Diagnostics button
+        ctk.CTkButton(
+            title_frame,
+            text="🔍 Діагностика",
+            width=120,
+            height=30,
+            font=ctk.CTkFont(size=12),
+            fg_color="#2c3e50",
+            hover_color="#34495e",
+            border_width=1,
+            border_color="#555555",
+            corner_radius=8,
+            command=self._run_diagnostics,
+        ).pack(side="right", padx=(0, 6))
 
         # Tab view
         self.tabs = ctk.CTkTabview(self, width=self.WIDTH - 40)
-        self.tabs.pack(fill="both", expand=True, padx=20, pady=(10, 0))
+        self.tabs.pack(fill="both", expand=True, padx=20, pady=(6, 0))
 
-        self._build_send_tab(self.tabs.add("\U0001f4e4  Надіслати"))
-        self._build_recv_tab(self.tabs.add("\U0001f4e5  Отримати"))
+        self._build_send_tab(self.tabs.add("📤  Надіслати"))
+        self._build_recv_tab(self.tabs.add("📥  Отримати"))
 
-        # Status / progress area (shared)
+        # ── Status / progress area (shared) ───────────────────────
         status_frame = ctk.CTkFrame(self)
-        status_frame.pack(fill="x", padx=20, pady=(6, 12))
+        status_frame.pack(fill="x", padx=20, pady=(4, 6))
 
-        self.progress_bar = ctk.CTkProgressBar(status_frame, height=18)
-        self.progress_bar.pack(fill="x", padx=12, pady=(10, 4))
+        # Connection status indicator
+        self.status_indicator = ctk.CTkLabel(
+            status_frame,
+            text="⚪  Готовий",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="gray",
+        )
+        self.status_indicator.pack(padx=12, pady=(6, 0))
+
+        # Progress bar
+        self.progress_bar = ctk.CTkProgressBar(status_frame, height=16)
+        self.progress_bar.pack(fill="x", padx=12, pady=(4, 2))
         self.progress_bar.set(0)
 
         self.progress_label = ctk.CTkLabel(
             status_frame,
             text="",
-            font=ctk.CTkFont(size=13),
+            font=ctk.CTkFont(size=12),
         )
         self.progress_label.pack(padx=12, pady=(0, 2))
 
+        # Status log textbox
         self.status_box = ctk.CTkTextbox(
             status_frame,
-            height=130,
-            font=ctk.CTkFont(family="Consolas", size=12),
+            height=110,
+            font=ctk.CTkFont(family="Consolas", size=11),
             state="disabled",
             wrap="word",
         )
-        self.status_box.pack(fill="x", padx=12, pady=(4, 10))
+        self.status_box.pack(fill="x", padx=12, pady=(2, 4))
 
-        # Copyright footer
-        ctk.CTkLabel(
-            self,
-            text="\u00a9 2026 Artem Marchenko. All rights reserved.",
-            font=ctk.CTkFont(size=10),
-            text_color="gray",
-        ).pack(pady=(0, 4))
+        # Bottom buttons row: log actions + cancel
+        btn_row = ctk.CTkFrame(status_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=12, pady=(0, 8))
 
-        # Cancel button
+        ctk.CTkButton(
+            btn_row,
+            text="📋 Копіювати лог",
+            width=130,
+            height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color="#3a3a3a",
+            hover_color="#4a4a4a",
+            border_width=1,
+            border_color="#555555",
+            command=self._copy_log,
+        ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            btn_row,
+            text="💾 Зберегти лог",
+            width=130,
+            height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color="#3a3a3a",
+            hover_color="#4a4a4a",
+            border_width=1,
+            border_color="#555555",
+            command=self._save_log,
+        ).pack(side="left")
+
+        # Cancel button — right-aligned in the same row
         self.cancel_btn = ctk.CTkButton(
-            status_frame,
-            text="\u23f9 Скасувати",
+            btn_row,
+            text="⏹ Скасувати",
+            width=130,
+            height=28,
             fg_color="#c0392b",
             hover_color="#e74c3c",
             command=self._on_cancel,
             state="disabled",
         )
-        self.cancel_btn.pack(pady=(0, 10))
+        self.cancel_btn.pack(side="right")
+
+        # Copyright footer
+        ctk.CTkLabel(
+            self,
+            text="© 2026 Artem Marchenko. All rights reserved.",
+            font=ctk.CTkFont(size=10),
+            text_color="gray",
+        ).pack(pady=(0, 4))
 
     # ── Send tab ───────────────────────────────────────────────────
 
@@ -228,11 +268,11 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             tab,
             text="Оберіть файл для надсилання:",
-            font=ctk.CTkFont(size=14),
-        ).pack(anchor="w", padx=10, pady=(10, 4))
+            font=ctk.CTkFont(size=13),
+        ).pack(anchor="w", padx=10, pady=(6, 2))
 
         file_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        file_frame.pack(fill="x", padx=10, pady=4)
+        file_frame.pack(fill="x", padx=10, pady=2)
 
         self.file_entry = ctk.CTkEntry(
             file_frame,
@@ -243,14 +283,32 @@ class App(ctk.CTk):
 
         ctk.CTkButton(
             file_frame,
-            text="\U0001f4c1 Огляд",
+            text="📁 Огляд",
             width=100,
             command=self._browse_file,
         ).pack(side="right")
 
+        # File info label (size + warning)
+        self.file_info_label = ctk.CTkLabel(
+            tab,
+            text="",
+            font=ctk.CTkFont(size=12),
+            text_color="gray",
+        )
+        self.file_info_label.pack(anchor="w", padx=14, pady=(2, 0))
+
+        # 5 GB warning (hidden by default)
+        self.size_warning_label = ctk.CTkLabel(
+            tab,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color="#e74c3c",
+        )
+        self.size_warning_label.pack(anchor="w", padx=14, pady=(0, 0))
+
         # Session code display
         code_frame = ctk.CTkFrame(tab)
-        code_frame.pack(fill="x", padx=10, pady=(14, 4))
+        code_frame.pack(fill="x", padx=10, pady=(6, 2))
 
         ctk.CTkLabel(
             code_frame,
@@ -258,13 +316,29 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=13),
         ).pack(anchor="w", padx=10, pady=(8, 0))
 
+        code_inner = ctk.CTkFrame(code_frame, fg_color="transparent")
+        code_inner.pack(fill="x", padx=10, pady=(4, 4))
+
         self.send_code_label = ctk.CTkLabel(
-            code_frame,
+            code_inner,
             text="— — — —",
-            font=ctk.CTkFont(family="Consolas", size=28, weight="bold"),
+            font=ctk.CTkFont(family="Consolas", size=24, weight="bold"),
             text_color="#3498db",
         )
-        self.send_code_label.pack(padx=10, pady=(4, 4))
+        self.send_code_label.pack(side="left", padx=(0, 10))
+
+        self.copy_code_btn = ctk.CTkButton(
+            code_inner,
+            text="📋",
+            width=36,
+            height=36,
+            font=ctk.CTkFont(size=16),
+            fg_color="#555555",
+            hover_color="#666666",
+            command=self._copy_session_code,
+            state="disabled",
+        )
+        self.copy_code_btn.pack(side="left")
 
         ctk.CTkLabel(
             code_frame,
@@ -275,12 +349,12 @@ class App(ctk.CTk):
 
         self.send_btn = ctk.CTkButton(
             tab,
-            text="\U0001f680 Надіслати",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            height=42,
+            text="🚀 Надіслати",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=38,
             command=self._on_send,
         )
-        self.send_btn.pack(fill="x", padx=10, pady=(12, 8))
+        self.send_btn.pack(fill="x", padx=10, pady=(8, 6))
 
     # ── Receive tab ────────────────────────────────────────────────
 
@@ -288,27 +362,43 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             tab,
             text="Введіть код сесії від відправника:",
-            font=ctk.CTkFont(size=14),
-        ).pack(anchor="w", padx=10, pady=(10, 4))
+            font=ctk.CTkFont(size=13),
+        ).pack(anchor="w", padx=10, pady=(6, 2))
 
         self.recv_code_entry = ctk.CTkEntry(
             tab,
             placeholder_text="xxxx-xxxx",
-            font=ctk.CTkFont(family="Consolas", size=22),
-            height=44,
+            font=ctk.CTkFont(family="Consolas", size=20),
+            height=40,
             justify="center",
         )
-        self.recv_code_entry.pack(fill="x", padx=10, pady=4)
+        self.recv_code_entry.pack(fill="x", padx=10, pady=2)
+
+        # Paste button next to entry for convenience
+        paste_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        paste_frame.pack(fill="x", padx=10, pady=(2, 0))
+        ctk.CTkButton(
+            paste_frame,
+            text="📋 Вставити код",
+            width=120,
+            height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color="#3a3a3a",
+            hover_color="#4a4a4a",
+            border_width=1,
+            border_color="#555555",
+            command=self._paste_session_code,
+        ).pack(side="left")
 
         # Save directory
         ctk.CTkLabel(
             tab,
             text="Зберегти в:",
             font=ctk.CTkFont(size=13),
-        ).pack(anchor="w", padx=10, pady=(14, 4))
+        ).pack(anchor="w", padx=10, pady=(8, 2))
 
         dir_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        dir_frame.pack(fill="x", padx=10, pady=4)
+        dir_frame.pack(fill="x", padx=10, pady=2)
 
         self.save_dir_entry = ctk.CTkEntry(dir_frame, state="readonly")
         self.save_dir_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -324,19 +414,19 @@ class App(ctk.CTk):
 
         ctk.CTkButton(
             dir_frame,
-            text="\U0001f4c1 Огляд",
+            text="📁 Огляд",
             width=100,
             command=self._browse_save_dir,
         ).pack(side="right")
 
         self.recv_btn = ctk.CTkButton(
             tab,
-            text="\U0001f4e5 Отримати",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            height=42,
+            text="📥 Отримати",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=38,
             command=self._on_receive,
         )
-        self.recv_btn.pack(fill="x", padx=10, pady=(16, 8))
+        self.recv_btn.pack(fill="x", padx=10, pady=(10, 6))
 
     # ── UI helpers ─────────────────────────────────────────────────
 
@@ -347,6 +437,28 @@ class App(ctk.CTk):
             self.file_entry.delete(0, "end")
             self.file_entry.insert(0, path)
             self.file_entry.configure(state="readonly")
+            self._update_file_info(path)
+
+    def _update_file_info(self, path: str):
+        """Show file size and 5GB warning after file selection."""
+        try:
+            size = Path(path).stat().st_size
+            name = Path(path).name
+            self.file_info_label.configure(
+                text=f"📄 {name} — {_human_size(size)}"
+            )
+            if size > VPS_MAX_FILE_SIZE:
+                self.size_warning_label.configure(
+                    text=(
+                        f"⚠️ Файл перевищує ліміт {_human_size(VPS_MAX_FILE_SIZE)}. "
+                        "Передача може бути перервана сервером."
+                    )
+                )
+            else:
+                self.size_warning_label.configure(text="")
+        except Exception:
+            self.file_info_label.configure(text="")
+            self.size_warning_label.configure(text="")
 
     def _browse_save_dir(self):
         path = filedialog.askdirectory(title="Оберіть папку для збереження")
@@ -357,11 +469,473 @@ class App(ctk.CTk):
             self.save_dir_entry.insert(0, path)
             self.save_dir_entry.configure(state="readonly")
 
+    def _copy_session_code(self):
+        """Copy session code to clipboard."""
+        code = self.send_code_label.cget("text")
+        if code and code != "— — — —":
+            self.clipboard_clear()
+            self.clipboard_append(code)
+            # Brief visual feedback
+            old_text = self.copy_code_btn.cget("text")
+            self.copy_code_btn.configure(text="✓")
+            self.after(1500, lambda: self.copy_code_btn.configure(text=old_text))
+
+    def _paste_session_code(self):
+        """Paste session code from clipboard into the receive code entry."""
+        try:
+            text = self.clipboard_get().strip()
+        except Exception:
+            return
+        if text:
+            self.recv_code_entry.delete(0, "end")
+            self.recv_code_entry.insert(0, text)
+
+    def _copy_log(self):
+        """Copy the entire status log to clipboard."""
+        self.status_box.configure(state="normal")
+        text = self.status_box.get("1.0", "end").strip()
+        self.status_box.configure(state="disabled")
+        if text:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self._log("📋 Лог скопійовано в буфер обміну")
+
+    def _save_log(self):
+        """Save the status log to a text file."""
+        self.status_box.configure(state="normal")
+        text = self.status_box.get("1.0", "end").strip()
+        self.status_box.configure(state="disabled")
+        if not text:
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Зберегти лог",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            initialfile=f"secureshare_log_{datetime.datetime.now():%Y%m%d_%H%M%S}.txt",
+        )
+        if path:
+            try:
+                header = (
+                    f"SecureShare v{APP_VERSION} — Log Export\n"
+                    f"Date: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n"
+                    f"{'=' * 50}\n\n"
+                )
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(header + text + "\n")
+                self._log(f"💾 Лог збережено: {Path(path).name}")
+            except Exception as exc:
+                self._log(f"❌ Помилка збереження логу: {exc}")
+
+    # ── Diagnostics ──────────────────────────────────────────────────
+
+    def _run_diagnostics(self):
+        """Run connectivity diagnostics in a background thread and show results."""
+        # Prevent multiple diagnostic windows
+        if hasattr(self, "_diag_win") and self._diag_win is not None:
+            try:
+                self._diag_win.focus()
+                return
+            except Exception:
+                pass
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"{APP_NAME} — Діагностика")
+        win.geometry("480x420")
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+        self._diag_win = win
+
+        def _on_close():
+            self._diag_win = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # Header
+        header = ctk.CTkFrame(win, fg_color="#1a3a5c", corner_radius=0)
+        header.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="🔍  Діагностика системи",
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color="white",
+        ).pack(padx=20, pady=12)
+
+        # Results area
+        results_frame = ctk.CTkFrame(win, fg_color="transparent")
+        results_frame.pack(fill="both", expand=True, padx=20, pady=(12, 6))
+
+        checks = [
+            ("internet",  "🌐  Інтернет-з'єднання"),
+            ("dns",       "🔗  DNS relay-сервера"),
+            ("tls",       "🔒  TLS/SSL сертифікат"),
+            ("websocket", "⚡  WebSocket з'єднання"),
+            ("latency",   "📊  Латентність (пінг)"),
+        ]
+
+        # Create result rows
+        row_widgets = {}
+        for i, (key, label_text) in enumerate(checks):
+            row = ctk.CTkFrame(results_frame, fg_color="#2a2a2a", corner_radius=8)
+            row.pack(fill="x", pady=3)
+            row.grid_columnconfigure(1, weight=1)
+
+            ctk.CTkLabel(
+                row, text=label_text,
+                font=ctk.CTkFont(size=13),
+                anchor="w",
+            ).grid(row=0, column=0, padx=12, pady=10, sticky="w")
+
+            status_label = ctk.CTkLabel(
+                row, text="⏳ Перевіряю...",
+                font=ctk.CTkFont(size=12),
+                text_color="#f39c12",
+                anchor="e",
+            )
+            status_label.grid(row=0, column=1, padx=12, pady=10, sticky="e")
+            row_widgets[key] = (row, status_label)
+
+        # Summary label (below checks)
+        summary_label = ctk.CTkLabel(
+            win, text="",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        summary_label.pack(pady=(4, 2))
+
+        # Close button
+        close_btn = ctk.CTkButton(
+            win, text="Закрити", width=140, height=32,
+            fg_color="#1a3a5c", hover_color="#2471a3",
+            command=_on_close,
+        )
+        close_btn.pack(pady=(2, 12))
+
+        def _update_row(key: str, ok: bool, detail: str,
+                        color: str | None = None):
+            """Thread-safe row update."""
+            row_frame, lbl = row_widgets[key]
+            if ok:
+                txt = f"✅  {detail}"
+                clr = color or "#2ecc71"
+                bg = "#1a2e1a"
+            else:
+                txt = f"❌  {detail}"
+                clr = color or "#e74c3c"
+                bg = "#2e1a1a"
+
+            def _do():
+                lbl.configure(text=txt, text_color=clr)
+                row_frame.configure(fg_color=bg)
+            win.after(0, _do)
+
+        def _run_checks():
+            parsed = urlparse(VPS_RELAY_URL)
+            host = parsed.hostname or "secureshare-relay.duckdns.org"
+            port = parsed.port or 443
+            passed = 0
+            total = len(checks)
+
+            # 1. Internet connectivity
+            try:
+                socket.setdefaulttimeout(5)
+                socket.create_connection(("8.8.8.8", 53), timeout=5).close()
+                _update_row("internet", True, "Підключено")
+                passed += 1
+            except Exception as e:
+                _update_row("internet", False, f"Немає з'єднання")
+                # If no internet, mark all remaining as failed
+                for key in ["dns", "tls", "websocket", "latency"]:
+                    _update_row(key, False, "Пропущено (немає інтернету)",
+                                "#888888")
+                win.after(0, lambda: summary_label.configure(
+                    text=f"Результат: {passed}/{total} перевірок пройдено",
+                    text_color="#e74c3c",
+                ))
+                return
+
+            # 2. DNS resolution
+            try:
+                t0 = time.perf_counter()
+                ip = socket.gethostbyname(host)
+                dns_ms = (time.perf_counter() - t0) * 1000
+                _update_row("dns", True, f"{ip}  ({dns_ms:.0f} мс)")
+                passed += 1
+            except Exception:
+                _update_row("dns", False, f"Не вдалося резолвити {host}")
+                for key in ["tls", "websocket", "latency"]:
+                    _update_row(key, False, "Пропущено (DNS помилка)",
+                                "#888888")
+                win.after(0, lambda: summary_label.configure(
+                    text=f"Результат: {passed}/{total} перевірок пройдено",
+                    text_color="#e74c3c",
+                ))
+                return
+
+            # 3. TLS/SSL certificate
+            try:
+                ctx = ssl.create_default_context()
+                with socket.create_connection((host, port), timeout=5) as raw:
+                    with ctx.wrap_socket(raw, server_hostname=host) as ssock:
+                        cert = ssock.getpeercert()
+                        issuer_parts = dict(
+                            x[0] for x in cert.get("issuer", [])
+                        )
+                        issuer = issuer_parts.get(
+                            "organizationName", "Unknown"
+                        )
+                        not_after = cert.get("notAfter", "?")
+                        _update_row("tls", True,
+                                    f"{issuer} (до {not_after})")
+                        passed += 1
+            except ssl.SSLCertVerificationError as e:
+                _update_row("tls", False, "Невалідний сертифікат")
+            except Exception as e:
+                _update_row("tls", False, f"Помилка: {type(e).__name__}")
+
+            # 4. WebSocket connection
+            ws_ok = False
+            try:
+                import websockets.sync.client as wsc
+                t0 = time.perf_counter()
+                ws = wsc.connect(
+                    f"{VPS_RELAY_URL}/health",
+                    open_timeout=5,
+                    close_timeout=3,
+                )
+                ws_ms = (time.perf_counter() - t0) * 1000
+                ws.close()
+                _update_row("websocket", True, f"OK  ({ws_ms:.0f} мс)")
+                passed += 1
+                ws_ok = True
+            except Exception:
+                # Try plain HTTPS health check as fallback
+                try:
+                    import urllib.request
+                    health_url = VPS_RELAY_URL.replace(
+                        "wss://", "https://"
+                    ) + "/health"
+                    t0 = time.perf_counter()
+                    resp = urllib.request.urlopen(health_url, timeout=5)
+                    ws_ms = (time.perf_counter() - t0) * 1000
+                    if resp.status == 200:
+                        _update_row("websocket", True,
+                                    f"OK (HTTP, {ws_ms:.0f} мс)")
+                        passed += 1
+                        ws_ok = True
+                    else:
+                        _update_row("websocket", False,
+                                    f"HTTP {resp.status}")
+                except Exception as e2:
+                    _update_row("websocket", False,
+                                f"Не вдалося підключитися")
+
+            # 5. Latency (3 TCP pings, take median)
+            try:
+                pings = []
+                for _ in range(3):
+                    t0 = time.perf_counter()
+                    s = socket.create_connection((host, port), timeout=5)
+                    elapsed = (time.perf_counter() - t0) * 1000
+                    s.close()
+                    pings.append(elapsed)
+                    time.sleep(0.1)
+                pings.sort()
+                median = pings[len(pings) // 2]
+                avg = sum(pings) / len(pings)
+                if median < 100:
+                    quality = "Відмінно"
+                    clr = "#2ecc71"
+                elif median < 250:
+                    quality = "Добре"
+                    clr = "#f1c40f"
+                else:
+                    quality = "Повільно"
+                    clr = "#e67e22"
+                _update_row("latency", True,
+                            f"{median:.0f} мс ({quality})", clr)
+                passed += 1
+            except Exception:
+                _update_row("latency", False, "Не вдалося виміряти")
+
+            # Summary
+            if passed == total:
+                s_text = f"✅  Все працює! ({passed}/{total})"
+                s_color = "#2ecc71"
+            elif passed >= 3:
+                s_text = f"⚠️  Частково ({passed}/{total})"
+                s_color = "#f39c12"
+            else:
+                s_text = f"❌  Проблеми ({passed}/{total})"
+                s_color = "#e74c3c"
+
+            win.after(0, lambda: summary_label.configure(
+                text=s_text, text_color=s_color,
+            ))
+
+        # Run checks in background thread
+        threading.Thread(target=_run_checks, daemon=True).start()
+
+    # ── Help popup ───────────────────────────────────────────────────
+
+    def _show_help(self):
+        """Open a modal help window with step-by-step instructions."""
+        # Prevent multiple help windows
+        if hasattr(self, "_help_win") and self._help_win is not None:
+            try:
+                self._help_win.focus()
+                return
+            except Exception:
+                pass
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"{APP_NAME} — Інструкція")
+        win.geometry("520x560")
+        win.resizable(True, True)
+        win.transient(self)
+        win.grab_set()
+        self._help_win = win
+
+        def _on_close():
+            self._help_win = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # Header with accent background
+        header_frame = ctk.CTkFrame(win, fg_color="#1a5276", corner_radius=0)
+        header_frame.pack(fill="x")
+        ctk.CTkLabel(
+            header_frame,
+            text="📖  Як користуватися SecureShare",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="white",
+        ).pack(padx=20, pady=14)
+
+        # Scrollable content
+        scroll = ctk.CTkScrollableFrame(win, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=12, pady=(8, 6))
+
+        # Section color scheme: (title, body, card_color, title_color, accent_bar)
+        help_sections = [
+            (
+                "📤  Надсилання файлу",
+                "1.  Відкрийте вкладку «Надіслати»\n"
+                "2.  Натисніть «Огляд» та оберіть файл\n"
+                "3.  Натисніть «Надіслати» — програма згенерує код сесії\n"
+                "4.  Передайте цей код отримувачу (кнопка 📋)\n"
+                "5.  Дочекайтесь підключення отримувача\n"
+                "6.  Підтвердіть код верифікації\n"
+                "7.  Передача розпочнеться автоматично",
+                "#1a3a2a",  # card bg
+                "#2ecc71",  # title color (green)
+            ),
+            (
+                "📥  Отримання файлу",
+                "1.  Відкрийте вкладку «Отримати»\n"
+                "2.  Введіть код сесії від відправника\n"
+                "3.  Оберіть папку збереження\n"
+                "4.  Натисніть «Отримати»\n"
+                "5.  Підтвердіть код верифікації\n"
+                "6.  Файл збережеться у вказану папку",
+                "#1a2a3a",  # card bg
+                "#3498db",  # title color (blue)
+            ),
+            (
+                "🔑  Код верифікації",
+                "Після підключення обидва пристрої покажуть\n"
+                "однаковий 4-символьний код.\n\n"
+                "✅ Коди збігаються → натисніть «Так»\n"
+                "❌ Коди різні → натисніть «Ні» і спробуйте ще раз\n\n"
+                "Це захищає від атак посередника (MITM).",
+                "#2a2a1a",  # card bg
+                "#f1c40f",  # title color (yellow)
+            ),
+            (
+                "🔒  Безпека",
+                "•  Шифрування: AES-256-GCM (наскрізне)\n"
+                "•  Обмін ключами: X25519 (Diffie-Hellman)\n"
+                "•  Сервер НЕ бачить ваших даних\n"
+                "•  Код сесії одноразовий",
+                "#1a1a2a",  # card bg
+                "#9b59b6",  # title color (purple)
+            ),
+            (
+                "⚠️  Обмеження",
+                f"•  Максимальний розмір: {VPS_MAX_FILE_SIZE // (1024**3)} ГБ на сесію\n"
+                "•  Один файл за сесію (для кількох → архів)\n"
+                "•  Потрібен інтернет на обох пристроях\n"
+                "•  Для великих файлів — розбийте архіватором",
+                "#2a1a1a",  # card bg
+                "#e74c3c",  # title color (red)
+            ),
+            (
+                "🛠  Вирішення проблем",
+                "•  Немає з'єднання → перевірте інтернет\n"
+                "•  Передача перервалась → новий код і спробуйте знову\n"
+                "•  Діагностика → «Копіювати лог» / «Зберегти лог»\n"
+                "•  Зупинити передачу → кнопка «Скасувати»",
+                "#1a2a2a",  # card bg
+                "#1abc9c",  # title color (teal)
+            ),
+        ]
+
+        for title, body, card_bg, title_color in help_sections:
+            # Card container
+            card = ctk.CTkFrame(scroll, fg_color=card_bg, corner_radius=8)
+            card.pack(fill="x", padx=4, pady=4)
+
+            # Colored title
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=ctk.CTkFont(size=14, weight="bold"),
+                text_color=title_color,
+                anchor="w",
+            ).pack(fill="x", padx=12, pady=(10, 4))
+
+            # Body text
+            ctk.CTkLabel(
+                card,
+                text=body,
+                font=ctk.CTkFont(size=12),
+                text_color="#cccccc",
+                anchor="w",
+                justify="left",
+                wraplength=430,
+            ).pack(fill="x", padx=20, pady=(0, 10))
+
+        # Close button
+        ctk.CTkButton(
+            win,
+            text="Закрити",
+            width=140,
+            height=32,
+            fg_color="#1a5276",
+            hover_color="#2471a3",
+            command=_on_close,
+        ).pack(pady=(6, 12))
+
+    def _set_state(self, state: str):
+        """Update the connection status indicator."""
+        label_text, color = self._STATE_LABELS.get(
+            state, ("⚪  Готовий", "gray")
+        )
+        def _do():
+            self.status_indicator.configure(text=label_text, text_color=color)
+        self.after(0, _do)
+
     def _log(self, text: str):
-        """Append a line to the status textbox (thread-safe)."""
+        """Append a timestamped line to the status textbox (thread-safe)
+        and duplicate to Python logger (console + file)."""
+        ts = _timestamp()
+        line = f"{ts} {text}\n"
+        # Duplicate to Python logger so it goes to console + log file
+        log.info("[GUI] %s", text)
         def _do():
             self.status_box.configure(state="normal")
-            self.status_box.insert("end", text + "\n")
+            self.status_box.insert("end", line)
             self.status_box.see("end")
             self.status_box.configure(state="disabled")
         self.after(0, _do)
@@ -374,8 +948,8 @@ class App(ctk.CTk):
             eta = (total - done) / speed if speed > 0 else 0
             self.progress_label.configure(
                 text=(
-                    f"{pct:.1f}%  \u00b7  {_human_size(done)} / {_human_size(total)}"
-                    f"  \u00b7  \u26a1 {_human_speed(speed)}  \u00b7  \u23f1 {_human_eta(eta)}"
+                    f"{pct:.1f}%  ·  {_human_size(done)} / {_human_size(total)}"
+                    f"  ·  ⚡ {_human_speed(speed)}  ·  ⏱ {_human_eta(eta)}"
                 )
             )
         self.after(0, _do)
@@ -387,6 +961,9 @@ class App(ctk.CTk):
             self.send_btn.configure(state=state)
             self.recv_btn.configure(state=state)
             self.cancel_btn.configure(state=cancel_state)
+            self.copy_code_btn.configure(
+                state="normal" if not enabled else "disabled"
+            )
         self.after(0, _do)
 
     def _reset_ui(self):
@@ -399,7 +976,7 @@ class App(ctk.CTk):
         self._cancel_flag = True
         if self._current_transfer:
             self._current_transfer.cancel()
-        self._log("\u23f9 Скасовано користувачем")
+        self._log("⏹ Скасовано користувачем")
 
     # ── Verification dialog (mandatory MITM check) ────────────────
 
@@ -414,7 +991,7 @@ class App(ctk.CTk):
 
         def _show():
             dialog = ctk.CTkToplevel(self)
-            dialog.title("\U0001f510 Верифікація з'єднання")
+            dialog.title("🔐 Верифікація з'єднання")
             dialog.geometry("440x320")
             dialog.resizable(False, False)
             dialog.transient(self)
@@ -429,7 +1006,7 @@ class App(ctk.CTk):
 
             ctk.CTkLabel(
                 dialog,
-                text="\U0001f510 Верифікація з'єднання",
+                text="🔐 Верифікація з'єднання",
                 font=ctk.CTkFont(size=18, weight="bold"),
             ).pack(pady=(20, 8))
 
@@ -451,7 +1028,7 @@ class App(ctk.CTk):
 
             ctk.CTkLabel(
                 dialog,
-                text="\u26a0 Якщо коди різні \u2014 з'єднання може бути\nперехоплено зловмисником (MITM)!",
+                text="⚠ Якщо коди різні — з'єднання може бути\nперехоплено зловмисником (MITM)!",
                 font=ctk.CTkFont(size=12),
                 text_color="#e74c3c",
                 justify="center",
@@ -474,7 +1051,7 @@ class App(ctk.CTk):
 
             ctk.CTkButton(
                 btn_frame,
-                text="\u2705 Коди збігаються",
+                text="✅ Коди збігаються",
                 fg_color="#27ae60",
                 hover_color="#2ecc71",
                 command=_confirm,
@@ -483,7 +1060,7 @@ class App(ctk.CTk):
 
             ctk.CTkButton(
                 btn_frame,
-                text="\u274c Скасувати",
+                text="❌ Скасувати",
                 fg_color="#c0392b",
                 hover_color="#e74c3c",
                 command=_cancel,
@@ -497,6 +1074,32 @@ class App(ctk.CTk):
         return result[0] if result[0] is not None else False
 
     # ════════════════════════════════════════════════════════════════
+    #  Status callback adapter for ws_relay → GUI state indicator
+    # ════════════════════════════════════════════════════════════════
+
+    def _make_status_cb(self):
+        """Return a status callback that updates both the log and the state indicator."""
+        def _on_status(msg: str):
+            self._log(msg)
+            # Auto-detect state from relay status messages
+            lower = msg.lower()
+            if "підключаюсь" in lower:
+                self._set_state(self.STATE_CONNECTING)
+            elif "чекаю" in lower and ("отримувач" in lower or "відправник" in lower):
+                self._set_state(self.STATE_WAITING)
+            elif "обмін ключами" in lower:
+                self._set_state(self.STATE_KEY_EXCHANGE)
+            elif "верифікац" in lower and ("підтверджен" in lower or "код" in lower):
+                self._set_state(self.STATE_VERIFYING)
+            elif "надсилаю" in lower or "отримую" in lower:
+                self._set_state(self.STATE_TRANSFERRING)
+            elif "передано" in lower or "збережено" in lower:
+                self._set_state(self.STATE_DONE)
+            elif "помилка" in lower or "❌" in msg:
+                self._set_state(self.STATE_ERROR)
+        return _on_status
+
+    # ════════════════════════════════════════════════════════════════
     #  SEND workflow
     # ════════════════════════════════════════════════════════════════
 
@@ -506,11 +1109,24 @@ class App(ctk.CTk):
             messagebox.showwarning("Файл", "Будь ласка, оберіть файл для надсилання.")
             return
 
+        # Check file size > 5 GB — warn but allow
+        file_size = Path(filepath).stat().st_size
+        if file_size > VPS_MAX_FILE_SIZE:
+            proceed = messagebox.askyesno(
+                "Великий файл",
+                f"Файл ({_human_size(file_size)}) перевищує ліміт сервера "
+                f"({_human_size(VPS_MAX_FILE_SIZE)}).\n\n"
+                "Передача може бути перервана.\nПродовжити?",
+            )
+            if not proceed:
+                return
+
         code = _generate_code()
         self.send_code_label.configure(text=code)
         self._cancel_flag = False
         self._reset_ui()
         self._set_buttons(False)
+        self._set_state(self.STATE_IDLE)
 
         # Clear status
         self.status_box.configure(state="normal")
@@ -525,249 +1141,35 @@ class App(ctk.CTk):
         self._worker_thread.start()
 
     def _send_worker(self, filepath: str, code: str):
-        """Sender = SERVER role.  We listen and wait for the receiver to connect."""
-        signaling   = None
-        conn_sock   = None
-        udp_sock    = None
-        srv         = None
-        relay_srv   = None
-        cf_tunnel   = None
-        transfer_mode = None   # "tcp" | "udp" | "ws_relay" | "mqtt_relay"
-
+        """Send a file through the VPS relay server."""
         try:
-            crypto = CryptoSession(code)
+            sender = VPSRelaySender(
+                session_code=code,
+                filepath=filepath,
+                on_progress=self._set_progress,
+                on_status=self._make_status_cb(),
+                on_verify=self._verify_connection,
+            )
+            self._current_transfer = sender
 
-            # ── 1. Discover network ────────────────────────────────
-            self._log("\U0001f50d Визначаю мережеві параметри...")
-            local_ips = get_local_ips()
-            self._log(f"  Локальні IP: {', '.join(local_ips)}")
-
-            # Create TCP listener (sender = server)
-            srv = tcp_listen(0)
-            listen_port = srv.getsockname()[1]
-            self._log(f"  TCP порт: {listen_port}")
-
-            # Create UDP socket (for hole punching)
-            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                udp_sock.bind(("0.0.0.0", listen_port))
-            except OSError:
-                udp_sock.bind(("0.0.0.0", 0))
-            udp_port = udp_sock.getsockname()[1]
-
-            # STUN
-            self._log("\U0001f310 STUN: визначаю публічну адресу...")
-            pub_ip, pub_port, _ = stun_request(local_port=udp_port, existing_sock=udp_sock)
-            if pub_ip:
-                self._log(f"  Публічна адреса: {pub_ip}:{pub_port}")
-            else:
-                self._log("  STUN: не вдалося визначити \u26a0")
-
-            # UPnP
-            self._log("\U0001f50c UPnP: пробую відкрити порт...")
-            upnp_ok = upnp_add_mapping(listen_port, listen_port, "TCP")
-            if upnp_ok:
-                self._upnp_port = listen_port
-                ext_ip = upnp_get_external_ip()
-                self._log(f"  UPnP: порт {listen_port} відкрито \u2713 ({ext_ip})")
-            else:
-                self._log("  UPnP: недоступний \u26a0")
-
-            if self._cancel_flag:
-                return
-
-            # ── 2. Start local relay server + Cloudflare Tunnel ───
-            relay_url: Optional[str] = None
-            relay_srv = LocalRelayServer()
-            if relay_srv.start():
-                cf_tunnel = CloudflareTunnel()
-                relay_url = cf_tunnel.start(
-                    local_port=relay_srv.port,
-                    on_status=self._log,
-                )
-                if not relay_url:
-                    self._log("⚠ CF Tunnel недоступний — fallback на MQTT relay")
-            else:
-                self._log("⚠ Локальний relay сервер не запустився — fallback на MQTT relay")
-
-            if self._cancel_flag:
-                return
-
-            # ── 3. MQTT signaling (TLS + encrypted) ──────────────
-            self._log("\U0001f4e1 Підключаюсь до сигнального сервера (TLS)...")
-            signaling = SignalingClient(code, "sender")
-            if not signaling.connect():
-                self._log(f"\u274c Помилка MQTT: {signaling.error}")
-                return
-
-            self._log("\U0001f4e1 Публікую зашифровану інформацію...")
-            signaling.publish_info({
-                "local_ips":   local_ips,
-                "public_ip":   pub_ip,
-                "public_port": pub_port,
-                "listen_port": listen_port,
-                "udp_port":    udp_port,
-                "upnp":        upnp_ok,
-                "public_key":  base64.b64encode(crypto.get_public_key_bytes()).decode(),
-                "relay_url":   relay_url,   # None if CF tunnel not available
-            })
-
-            self._log("\u23f3 Чекаю отримувача...")
-            peer = signaling.wait_for_peer(timeout=300)
-            if self._cancel_flag:
-                return
-            if not peer:
-                self._log("\u274c Таймаут: отримувач не з'єднався")
-                return
-
-            self._log("\u2705 Отримувач знайдено!")
-
-            # ── 3. Derive encryption key ───────────────────────────
-            peer_pub_key = base64.b64decode(peer["public_key"])
-            crypto.derive_shared_key(peer_pub_key)
-
-            verification_code = crypto.get_verification_code()
-            self._log(f"\U0001f511 Код верифікації: {verification_code}")
-
-            # ── 3b. Mandatory verification ─────────────────────────
-            if not self._verify_connection(verification_code):
-                self._log("\u274c Верифікацію відхилено \u2014 з'єднання закрито")
-                return
-            self._log("\u2705 Верифікацію підтверджено")
-
-            peer_public_ip = peer.get("public_ip")
-            peer_udp_port = peer.get("udp_port", 0)
-
-            # ── 4. Establish connection ────────────────────────────
-            # TCP accept in background + short UDP hole punch.
-            # If all fail within ~10s → automatic relay fallback.
-
-            accept_result: list = [None, None]  # [socket, addr]
-
-            def _accept_worker():
-                try:
-                    srv.settimeout(15)
-                    s, a = srv.accept()
-                    accept_result[0] = s
-                    accept_result[1] = a
-                except Exception:
-                    pass
-
-            self._log("\u23f3 Пробую пряме з'єднання...")
-            accept_thread = threading.Thread(target=_accept_worker, daemon=True)
-            accept_thread.start()
-
-            # Wait briefly for TCP (LAN / localhost case)
-            accept_thread.join(timeout=5)
-            if accept_result[0]:
-                conn_sock = accept_result[0]
-                self._log(f"  TCP з'єднання від {accept_result[1][0]}:{accept_result[1][1]} \u2713")
-                transfer_mode = "tcp"
-
-            # Quick UDP hole punch attempt
-            if not conn_sock and pub_ip and peer_public_ip and peer_udp_port:
-                self._log("\U0001f528 UDP hole punch (8с)...")
-                if udp_hole_punch(
-                    udp_sock, peer_public_ip, peer_udp_port,
-                    timeout=8, on_status=self._log,
-                ):
-                    transfer_mode = "udp"
-
-            # Last check for late TCP
-            if not conn_sock and transfer_mode != "udp":
-                accept_thread.join(timeout=2)
-                if accept_result[0]:
-                    conn_sock = accept_result[0]
-                    self._log(f"  TCP з'єднання від {accept_result[1][0]}:{accept_result[1][1]} \u2713")
-                    transfer_mode = "tcp"
-
-            # ── Fallback: WS relay (CF Tunnel) or MQTT relay ──────
-            if not conn_sock and transfer_mode != "udp":
-                self._log("\u26a0 Пряме з'єднання не вдалося")
-                if relay_url:
-                    self._log("🌐 Переключаюсь на WS Relay (Cloudflare Tunnel)...")
-                    transfer_mode = "ws_relay"
-                else:
-                    self._log("\U0001f4e1 Переключаюсь на MQTT relay...")
-                    transfer_mode = "mqtt_relay"
-
-            if self._cancel_flag:
-                return
-
-            # ── 5. Transfer file ───────────────────────────────────
-            file_size = Path(filepath).stat().st_size
-            self._log(f"\U0001f4e6 Надсилаю: {Path(filepath).name} ({_human_size(file_size)})")
-
-            if transfer_mode == "tcp":
-                conn_sock.settimeout(120)
-                sender = TCPSender(
-                    conn_sock, filepath, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = sender
-                ok = sender.send()
-            elif transfer_mode == "udp":
-                sender = UDPSender(
-                    udp_sock, (peer_public_ip, peer_udp_port),
-                    filepath, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = sender
-                ok = sender.send()
-            elif transfer_mode == "ws_relay":
-                # Sender connects locally (not through cloudflare)
-                ws_sender = WSRelaySender(
-                    f"ws://localhost:{relay_srv.port}",
-                    code, filepath, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = ws_sender
-                ok = ws_sender.send()
-            else:
-                # MQTT relay last-resort fallback
-                relay_sender = MQTTRelaySender(
-                    code, filepath, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = relay_sender
-                ok = relay_sender.send()
+            ok = sender.send()
 
             if ok:
-                self._log("\U0001f389 Передачу завершено успішно!")
+                self._set_state(self.STATE_DONE)
+                self._log("🎉 Передачу завершено успішно!")
             elif self._cancel_flag:
-                self._log("\u23f9 Передачу скасовано")
+                self._set_state(self.STATE_IDLE)
+                self._log("⏹ Передачу скасовано")
             else:
-                self._log("\u274c Помилка передачі")
+                self._set_state(self.STATE_ERROR)
+                self._log("❌ Помилка передачі")
 
         except Exception as exc:
-            self._log(f"\u274c Помилка: {exc}")
+            self._set_state(self.STATE_ERROR)
+            self._log(f"❌ Помилка: {exc}")
             log.exception("Send worker error")
         finally:
             self._current_transfer = None
-            if signaling:
-                signaling.disconnect()
-            if conn_sock:
-                try:
-                    conn_sock.close()
-                except Exception:
-                    pass
-            if self._upnp_port:
-                upnp_remove_mapping(self._upnp_port, "TCP")
-                self._upnp_port = None
-            if srv:
-                try:
-                    srv.close()
-                except Exception:
-                    pass
-            if cf_tunnel:
-                cf_tunnel.stop()
-            if relay_srv:
-                relay_srv.stop()
             self._set_buttons(True)
 
     # ════════════════════════════════════════════════════════════════
@@ -788,6 +1190,7 @@ class App(ctk.CTk):
         self._cancel_flag = False
         self._reset_ui()
         self._set_buttons(False)
+        self._set_state(self.STATE_IDLE)
 
         self.status_box.configure(state="normal")
         self.status_box.delete("1.0", "end")
@@ -801,192 +1204,33 @@ class App(ctk.CTk):
         self._worker_thread.start()
 
     def _recv_worker(self, code: str, save_dir: str):
-        """Receiver = CLIENT role.  We connect TO the sender."""
-        signaling     = None
-        conn_sock     = None
-        udp_sock      = None
-        transfer_mode = None
-        relay_url:    Optional[str] = None
-
+        """Receive a file through the VPS relay server."""
         try:
-            crypto = CryptoSession(code)
+            receiver = VPSRelayReceiver(
+                session_code=code,
+                save_dir=save_dir,
+                on_progress=self._set_progress,
+                on_status=self._make_status_cb(),
+                on_verify=self._verify_connection,
+            )
+            self._current_transfer = receiver
 
-            # ── 1. Discover network ────────────────────────────────
-            self._log("\U0001f50d Визначаю мережеві параметри...")
-            local_ips = get_local_ips()
-            self._log(f"  Локальні IP: {', '.join(local_ips)}")
-
-            # UDP socket (for hole punching)
-            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            udp_sock.bind(("0.0.0.0", 0))
-            udp_port = udp_sock.getsockname()[1]
-
-            # STUN (to detect if same network as sender)
-            self._log("\U0001f310 STUN: визначаю публічну адресу...")
-            pub_ip, pub_port, _ = stun_request(local_port=udp_port, existing_sock=udp_sock)
-            if pub_ip:
-                self._log(f"  Публічна адреса: {pub_ip}:{pub_port}")
-            else:
-                self._log("  STUN: не вдалося визначити \u26a0")
-
-            if self._cancel_flag:
-                return
-
-            # ── 2. MQTT signaling (TLS + encrypted) ──────────────
-            self._log("\U0001f4e1 Підключаюсь до сигнального сервера (TLS)...")
-            signaling = SignalingClient(code, "receiver")
-            if not signaling.connect():
-                self._log(f"\u274c Помилка MQTT: {signaling.error}")
-                return
-
-            self._log("\U0001f4e1 Публікую зашифровану інформацію...")
-            signaling.publish_info({
-                "local_ips": local_ips,
-                "public_ip": pub_ip,
-                "public_port": pub_port,
-                "udp_port": udp_port,
-                "public_key": base64.b64encode(crypto.get_public_key_bytes()).decode(),
-            })
-
-            self._log("\u23f3 Шукаю відправника...")
-            peer = signaling.wait_for_peer(timeout=300)
-            if self._cancel_flag:
-                return
-            if not peer:
-                self._log("\u274c Таймаут: відправник не знайдено")
-                return
-
-            self._log("\u2705 Відправника знайдено!")
-
-            # ── 3. Derive encryption key ───────────────────────────
-            peer_pub_key = base64.b64decode(peer["public_key"])
-            crypto.derive_shared_key(peer_pub_key)
-
-            verification_code = crypto.get_verification_code()
-            self._log(f"\U0001f511 Код верифікації: {verification_code}")
-
-            # ── 3b. Mandatory verification ─────────────────────────
-            if not self._verify_connection(verification_code):
-                self._log("\u274c Верифікацію відхилено \u2014 з'єднання закрито")
-                return
-            self._log("\u2705 Верифікацію підтверджено")
-
-            # ── 4. Connect to sender (receiver = client) ───────────
-            peer_local_ips   = peer.get("local_ips", [])
-            peer_public_ip   = peer.get("public_ip")
-            peer_listen_port = peer.get("listen_port", 0)
-            peer_udp_port    = peer.get("udp_port", 0)
-            peer_upnp        = peer.get("upnp", False)
-            relay_url        = peer.get("relay_url")   # Cloudflare Tunnel URL
-
-            # Build candidate IP list for TCP connection
-            tcp_candidates = list(peer_local_ips)
-
-            # Detect same machine (overlapping local IPs) → try localhost
-            my_ips_set = set(local_ips)
-            peer_ips_set = set(peer_local_ips)
-            same_machine = bool(my_ips_set & peer_ips_set)
-            if same_machine:
-                tcp_candidates = ["127.0.0.1"] + tcp_candidates
-                self._log("\U0001f5a5\ufe0f Виявлено ту саму машину \u2014 пробую localhost...")
-
-            # Strategy 1: LAN / same machine (parallel TCP, 3s)
-            if pub_ip and peer_public_ip and pub_ip == peer_public_ip and peer_listen_port:
-                self._log("\U0001f3e0 LAN \u2014 з'єднуюсь (3с)...")
-                conn_sock = tcp_connect_any(
-                    tcp_candidates, peer_listen_port,
-                    timeout=3, on_status=self._log,
-                )
-                if conn_sock:
-                    transfer_mode = "tcp"
-
-            # Strategy 2: TCP to sender's public IP (3s)
-            if not conn_sock and peer_public_ip and peer_listen_port:
-                self._log(f"\U0001f310 TCP до {peer_public_ip}:{peer_listen_port} (3с)...")
-                conn_sock = tcp_connect(peer_public_ip, peer_listen_port, timeout=3)
-                if conn_sock:
-                    self._log("  TCP \u2713")
-                    transfer_mode = "tcp"
-
-            # Strategy 3: Quick UDP hole punch (8s)
-            if not conn_sock and pub_ip and peer_public_ip and peer_udp_port:
-                self._log("\U0001f528 UDP hole punch (8с)...")
-                if udp_hole_punch(
-                    udp_sock, peer_public_ip, peer_udp_port,
-                    timeout=8, on_status=self._log,
-                ):
-                    transfer_mode = "udp"
-
-            # ── Fallback: WS relay (CF Tunnel) or MQTT relay ──────
-            if not conn_sock and transfer_mode != "udp":
-                self._log("\u26a0 Пряме з'єднання не вдалося")
-                if relay_url:
-                    self._log("🌐 Переключаюсь на WS Relay (Cloudflare Tunnel)...")
-                    transfer_mode = "ws_relay"
-                else:
-                    self._log("\U0001f4e1 Переключаюсь на MQTT relay...")
-                    transfer_mode = "mqtt_relay"
-
-            if self._cancel_flag:
-                return
-
-            # ── 5. Receive file ────────────────────────────────────
-            self._log("\U0001f4e5 Починаю отримання...")
-
-            if transfer_mode == "tcp":
-                conn_sock.settimeout(120)
-                receiver = TCPReceiver(
-                    conn_sock, save_dir, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = receiver
-                result = receiver.receive()
-            elif transfer_mode == "udp":
-                receiver = UDPReceiver(
-                    udp_sock, (peer_public_ip, peer_udp_port),
-                    save_dir, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = receiver
-                result = receiver.receive()
-            elif transfer_mode == "ws_relay":
-                ws_receiver = WSRelayReceiver(
-                    relay_url, code, save_dir, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = ws_receiver
-                result = ws_receiver.receive()
-            else:
-                # MQTT relay last-resort fallback
-                relay_receiver = MQTTRelayReceiver(
-                    code, save_dir, crypto,
-                    on_progress=self._set_progress,
-                    on_status=self._log,
-                )
-                self._current_transfer = relay_receiver
-                result = relay_receiver.receive()
+            result = receiver.receive()
 
             if result:
-                self._log(f"\U0001f389 Файл отримано: {result}")
+                self._set_state(self.STATE_DONE)
+                self._log(f"🎉 Файл отримано: {result}")
             elif self._cancel_flag:
-                self._log("\u23f9 Отримання скасовано")
+                self._set_state(self.STATE_IDLE)
+                self._log("⏹ Отримання скасовано")
             else:
-                self._log("\u274c Помилка отримання")
+                self._set_state(self.STATE_ERROR)
+                self._log("❌ Помилка отримання")
 
         except Exception as exc:
-            self._log(f"\u274c Помилка: {exc}")
+            self._set_state(self.STATE_ERROR)
+            self._log(f"❌ Помилка: {exc}")
             log.exception("Receive worker error")
         finally:
             self._current_transfer = None
-            if signaling:
-                signaling.disconnect()
-            if conn_sock:
-                try:
-                    conn_sock.close()
-                except Exception:
-                    pass
             self._set_buttons(True)

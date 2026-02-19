@@ -1,19 +1,27 @@
 """
-SecureShare — WebSocket relay transfer (Cloudflare Tunnel backend).
+SecureShare — VPS WebSocket relay transfer.
 
-Sender connects to  ws://localhost:{relay_server.port}
-Receiver connects to wss://{cloudflare_url}
-The local relay_server.py proxies all frames between them.
+Both sender and receiver connect to the same VPS relay server:
+  wss://secureshare-relay.duckdns.org
 
-No message size limits, no QoS overhead, no broker queues.
-All data is E2E encrypted at the application layer; this module
-never sees plaintext.
+The server pairs clients by session code and pipes raw bytes.
+All data is E2E encrypted — the server never inspects content.
 
-Message framing (binary WebSocket frames):
-  [1 B type] [payload]
+Protocol phases:
+  1. Key Exchange (signaling-encrypted with pre-shared key from session code)
+     Both sides send X25519 public key → derive shared AES-256 key.
+  2. Verification (signaling-encrypted)
+     Both sides confirm verification code matches (user interaction).
+  3. File Transfer (E2E encrypted with derived key)
+     Sender: metadata → chunks → done
+     Receiver: meta_ack → done_ack (with SHA-256 result)
 
-  type 0x43 ('C')  →  control  : [encrypted JSON]
-  type 0x44 ('D')  →  data     : [4 B seq-BE] [encrypted compressed chunk]
+Wire format:
+  [1 byte type][payload]
+
+  'S' (0x53)  signaling : signaling_encrypt(JSON)
+  'C' (0x43)  control   : e2e_encrypt(JSON)
+  'D' (0x44)  data      : [4B seq BE] e2e_encrypt(compressed_chunk)
 
 Control message types (JSON field "type"):
   relay_meta        sender → receiver   file info
@@ -25,6 +33,7 @@ Control message types (JSON field "type"):
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -44,14 +53,21 @@ try:
 except ImportError:
     _HAS_WS = False
 
-from .config import WS_RELAY_CHUNK_SIZE
-from .crypto_utils import CryptoSession
+from .config import VPS_RELAY_URL, VPS_CHUNK_SIZE
+from .crypto_utils import (
+    CryptoSession,
+    derive_signaling_key,
+    signaling_encrypt,
+    signaling_decrypt,
+)
 
 ProgressCB = Callable[[int, int, float], None]
 StatusCB   = Callable[[str], None]
+VerifyCB   = Callable[[str], bool]   # verification_code → user_confirmed
 
-_CTL = 0x43   # 'C'  control frame
-_DAT = 0x44   # 'D'  data frame
+_SIG = 0x53   # 'S'  signaling frame (key exchange / verification)
+_CTL = 0x43   # 'C'  control frame   (E2E encrypted)
+_DAT = 0x44   # 'D'  data frame      (E2E encrypted)
 
 _COMPRESS_FLAG = 0x01
 _RAW_FLAG      = 0x00
@@ -76,43 +92,164 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-# ════════════════════════════════════════════════════════════════════
-#  WSRelaySender
-# ════════════════════════════════════════════════════════════════════
+# ── Key Exchange (common for sender and receiver) ─────────────────
 
-class WSRelaySender:
+def _do_key_exchange(
+    ws,
+    session_code: str,
+    on_status: Optional[StatusCB],
+) -> Optional[CryptoSession]:
     """
-    Send a file through the local WebSocket relay server.
+    Perform X25519 key exchange over the WebSocket.
 
-    Connects to ws://localhost:{port} (local, direct — not via Cloudflare).
+    Both sides send their public key simultaneously (signaling-encrypted).
+    The VPS relay pipes A→B and B→A, so each side receives the other's key.
 
-    chunk_start / chunk_stride support parallel multi-tunnel transfers:
-      - stride=2, start=0 → sends chunks 0,2,4,6,…  (connection 0)
-      - stride=2, start=1 → sends chunks 1,3,5,7,…  (connection 1)
+    Returns CryptoSession with derived shared key, or None on failure.
+    """
+    crypto = CryptoSession(session_code)
+    sig_key = derive_signaling_key(session_code)
+
+    # Send our public key
+    pub_key_b64 = base64.b64encode(crypto.get_public_key_bytes()).decode()
+    sig_payload = json.dumps({"type": "pub_key", "key": pub_key_b64}).encode()
+    ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, sig_payload))
+
+    if on_status:
+        on_status("🔑 Обмін ключами...")
+
+    # Receive peer's public key (blocks until peer connects + sends)
+    try:
+        raw = ws.recv()
+    except Exception as e:
+        if on_status:
+            on_status(f"❌ Помилка обміну ключами: {e}")
+        return None
+
+    if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
+        if on_status:
+            on_status("❌ Невірний формат обміну ключами")
+        return None
+
+    try:
+        peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
+    except Exception:
+        if on_status:
+            on_status("❌ Помилка розшифрування ключа партнера")
+        return None
+
+    if peer_msg.get("type") != "pub_key" or "key" not in peer_msg:
+        if on_status:
+            on_status("❌ Невірне повідомлення обміну ключами")
+        return None
+
+    peer_pub_key = base64.b64decode(peer_msg["key"])
+    crypto.derive_shared_key(peer_pub_key)
+
+    return crypto
+
+
+def _do_verification(
+    ws,
+    crypto: CryptoSession,
+    sig_key: bytes,
+    on_verify: VerifyCB,
+    on_status: Optional[StatusCB],
+) -> bool:
+    """
+    Show verification code and exchange confirmation with peer.
+
+    Returns True if both sides verified successfully.
+    """
+    verification_code = crypto.get_verification_code()
+
+    if on_status:
+        on_status(f"🔑 Код верифікації: {verification_code}")
+
+    # Ask user to verify
+    if not on_verify(verification_code):
+        # User rejected — notify peer
+        reject_payload = json.dumps({"type": "verify_reject"}).encode()
+        try:
+            ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, reject_payload))
+        except Exception:
+            pass
+        if on_status:
+            on_status("❌ Верифікацію відхилено")
+        return False
+
+    # Send verification confirmation
+    confirm_payload = json.dumps({"type": "verified"}).encode()
+    ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, confirm_payload))
+
+    if on_status:
+        on_status("✅ Верифікацію підтверджено, чекаю підтвердження від партнера...")
+
+    # Wait for peer's verification
+    try:
+        raw = ws.recv()
+    except Exception as e:
+        if on_status:
+            on_status(f"❌ Помилка верифікації: {e}")
+        return False
+
+    if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
+        if on_status:
+            on_status("❌ Невірний формат верифікації")
+        return False
+
+    try:
+        peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
+    except Exception:
+        if on_status:
+            on_status("❌ Помилка розшифрування верифікації")
+        return False
+
+    if peer_msg.get("type") == "verify_reject":
+        if on_status:
+            on_status("❌ Партнер відхилив верифікацію")
+        return False
+
+    if peer_msg.get("type") != "verified":
+        if on_status:
+            on_status("❌ Невірне повідомлення верифікації")
+        return False
+
+    if on_status:
+        on_status("✅ Обидві сторони підтвердили верифікацію")
+
+    return True
+
+
+# ════════════════════════════════════════════════════════════════════
+#  VPSRelaySender
+# ════════════════════════════════════════════════════════════════════
+
+class VPSRelaySender:
+    """
+    Send a file through the VPS relay server.
+
+    Handles the entire flow: connect → key exchange → verify → transfer.
+    GUI only needs to provide callbacks for progress, status, and verification.
     """
 
     def __init__(
         self,
-        local_ws_url: str,           # ws://localhost:{port}
         session_code: str,
         filepath: str | Path,
-        crypto: CryptoSession,
         on_progress: Optional[ProgressCB] = None,
         on_status:   Optional[StatusCB]   = None,
-        chunk_start:  int = 0,       # first chunk index owned by this connection
-        chunk_stride: int = 1,       # step between owned chunks (1 = all chunks)
+        on_verify:   Optional[VerifyCB]   = None,
     ):
-        self._url          = local_ws_url
-        self._code         = session_code
-        self._filepath     = Path(filepath)
-        self._crypto       = crypto
-        self.on_progress   = on_progress
-        self.on_status     = on_status
-        self._cancelled    = False
+        self._code       = session_code
+        self._filepath   = Path(filepath)
+        self.on_progress = on_progress
+        self.on_status   = on_status
+        self.on_verify   = on_verify or (lambda code: True)
+        self._cancelled  = False
         self._ws: Optional[websocket.WebSocket] = None
+        self._crypto: Optional[CryptoSession] = None
         self._ctl_queue: queue.Queue = queue.Queue()
-        self._chunk_start  = chunk_start
-        self._chunk_stride = chunk_stride
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -125,133 +262,129 @@ class WSRelaySender:
     # ── Public entry point ─────────────────────────────────────────
 
     def send(self) -> bool:
+        """
+        Connect to VPS, perform key exchange + verification, send file.
+        Returns True on success, False on failure/cancel.
+        """
         if not _HAS_WS:
-            self._log("❌ WS Relay: потрібен пакет websocket-client")
+            self._log("❌ Потрібен пакет websocket-client")
             return False
+        try:
+            return self._send_impl()
+        except Exception as exc:
+            self._log(f"❌ Помилка: {exc}")
+            log.exception("VPSRelaySender error")
+            return False
+        finally:
+            self._close()
 
-        # Connect
-        self._log("🌐 WS Relay: підключаюсь до локального relay...")
+    def _send_impl(self) -> bool:
+        # ── 1. Connect to VPS ─────────────────────────────────────
+        self._log("🌐 Підключаюсь до relay сервера...")
         try:
             self._ws = websocket.WebSocket()
-            self._ws.connect(self._url, timeout=30)
-            self._ws.settimeout(120)            # 120s recv timeout during transfer
-            self._ws.send(self._code)           # register session code
+            self._ws.connect(VPS_RELAY_URL, timeout=30)
+            self._ws.settimeout(300)       # 5 min to wait for peer
+            self._ws.send(self._code)      # register session code
         except Exception as exc:
-            self._log(f"❌ WS Relay: помилка підключення: {exc}")
+            self._log(f"❌ Помилка підключення до relay: {exc}")
             return False
 
-        # Start background receiver thread (control messages from peer)
+        self._log("⏳ Чекаю отримувача...")
+
+        # ── 2. Key exchange ───────────────────────────────────────
+        self._crypto = _do_key_exchange(self._ws, self._code, self.on_status)
+        if not self._crypto:
+            return False
+
+        # ── 3. Verification ───────────────────────────────────────
+        sig_key = derive_signaling_key(self._code)
+        self._ws.settimeout(120)           # tighten timeout for verification
+
+        if not _do_verification(
+            self._ws, self._crypto, sig_key, self.on_verify, self.on_status
+        ):
+            return False
+
+        # ── 4. Start background receiver ──────────────────────────
         recv_thread = threading.Thread(target=self._recv_worker, daemon=True)
         recv_thread.start()
 
-        # Keepalive ping to prevent CF Tunnel idle timeout
-        self._ping_stop = threading.Event()
-        ping_thread = threading.Thread(target=self._ping_worker, daemon=True)
-        ping_thread.start()
-
-        # Hash file
+        # ── 5. Hash file and send metadata ────────────────────────
         file_name = self._filepath.name
         file_size = self._filepath.stat().st_size
-        self._log(f"🌐 WS Relay: обчислюю хеш {file_name}...")
+        self._log(f"🔍 Обчислюю хеш {file_name}...")
         file_hash    = _sha256_file(self._filepath)
-        total_chunks = (file_size + WS_RELAY_CHUNK_SIZE - 1) // WS_RELAY_CHUNK_SIZE
+        total_chunks = (file_size + VPS_CHUNK_SIZE - 1) // VPS_CHUNK_SIZE
 
-        # Send metadata
         self._send_ctl(json.dumps({
             "type":         "relay_meta",
             "name":         file_name,
             "size":         file_size,
             "sha256":       file_hash,
-            "chunk_size":   WS_RELAY_CHUNK_SIZE,
+            "chunk_size":   VPS_CHUNK_SIZE,
             "total_chunks": total_chunks,
         }).encode())
 
         # Wait for meta ACK
-        self._log("🌐 WS Relay: чекаю підтвердження метаданих...")
+        self._log("⏳ Чекаю підтвердження метаданих...")
         try:
             ack = self._ctl_queue.get(timeout=120)
         except queue.Empty:
-            self._log("❌ WS Relay: таймаут метаданих")
-            self._close()
+            self._log("❌ Таймаут метаданих")
             return False
         if ack.get("type") != "relay_meta_ack":
-            self._log("❌ WS Relay: неочікувана відповідь на метадані")
-            self._close()
+            self._log("❌ Неочікувана відповідь на метадані")
             return False
 
-        # My chunks: every chunk_stride-th chunk starting at chunk_start
-        my_seqs = list(range(self._chunk_start, total_chunks, self._chunk_stride))
-
+        # ── 6. Send file chunks ───────────────────────────────────
         size_str = (
             f"{file_size / (1024**3):.1f} ГБ"
             if file_size >= 1024**3
             else f"{file_size / (1024**2):.1f} МБ"
         )
-        conn_tag = (
-            f" [з'єдн. {self._chunk_start+1}/{self._chunk_stride}]"
-            if self._chunk_stride > 1 else ""
-        )
-        self._log(
-            f"🌐 WS Relay: передаю {file_name} ({size_str}, "
-            f"{len(my_seqs)}/{total_chunks} чанків{conn_tag})"
-        )
+        self._log(f"📦 Надсилаю: {file_name} ({size_str})")
 
         t0 = time.monotonic()
         sent_bytes = 0
         last_prog  = t0
 
-        # Window-based flow control using a counter+Condition (race-free).
-        # Window = 8 chunks × 512 KB = 4 MB — prevents relay buffer overflow.
-        WINDOW_SIZE = 8
-        self._window_cond      = threading.Condition()
-        self._window_acks_rcvd = 0   # incremented by _recv_worker
-
         with open(self._filepath, "rb") as f:
-            for local_idx, seq in enumerate(my_seqs):
+            for seq in range(total_chunks):
                 if self._cancelled:
-                    self._close()
                     return False
 
-                # Window boundary based on local (per-connection) index
-                if local_idx > 0 and local_idx % WINDOW_SIZE == 0:
-                    window_num = local_idx // WINDOW_SIZE
-                    with self._window_cond:
-                        deadline = time.monotonic() + 120
-                        while self._window_acks_rcvd < window_num:
-                            remaining = deadline - time.monotonic()
-                            if remaining <= 0:
-                                self._log("❌ WS Relay: таймаут window ACK від отримувача")
-                                self._close()
-                                return False
-                            self._window_cond.wait(timeout=min(remaining, 5))
-
-                f.seek(seq * WS_RELAY_CHUNK_SIZE)
-                chunk = f.read(WS_RELAY_CHUNK_SIZE)
+                chunk = f.read(VPS_CHUNK_SIZE)
                 if not chunk:
                     break
                 self._send_dat(seq, chunk)
                 sent_bytes += len(chunk)
+
                 now = time.monotonic()
                 if self.on_progress and (now - last_prog >= 0.3):
                     elapsed = now - t0
-                    self.on_progress(sent_bytes, file_size, sent_bytes / elapsed if elapsed > 0 else 0)
+                    self.on_progress(
+                        sent_bytes, file_size,
+                        sent_bytes / elapsed if elapsed > 0 else 0,
+                    )
                     last_prog = now
 
-        # Final progress snapshot
+        # Final progress
         if self.on_progress:
             elapsed = time.monotonic() - t0
-            self.on_progress(sent_bytes, file_size, sent_bytes / elapsed if elapsed > 0 else 0)
+            self.on_progress(
+                sent_bytes, file_size,
+                sent_bytes / elapsed if elapsed > 0 else 0,
+            )
 
-        # Send DONE — include which chunks this connection owns
+        # ── 7. Send DONE and wait for verification ────────────────
         done_payload = json.dumps({
             "type":         "relay_done",
             "sha256":       file_hash,
             "total_chunks": total_chunks,
-            "chunk_start":  self._chunk_start,
-            "chunk_stride": self._chunk_stride,
         }).encode()
         self._send_ctl(done_payload)
-        self._log("🌐 WS Relay: чекаю підтвердження / ретрансміт...")
+        self._log("⏳ Чекаю підтвердження цілісності...")
 
         # Retransmit / done-ack loop
         retransmit_rounds = 0
@@ -268,10 +401,9 @@ class WSRelaySender:
             if msg.get("type") == "relay_done_ack":
                 ok = msg.get("verified", False)
                 if ok:
-                    self._log("🎉 WS Relay: файл передано та перевірено ✓")
+                    self._log("🎉 Файл передано та перевірено ✓")
                 else:
-                    self._log("⚠ WS Relay: хеш не збігається у отримувача")
-                self._close()
+                    self._log("⚠ Хеш не збігається у отримувача")
                 return ok
 
             elif msg.get("type") == "relay_retransmit" and retransmit_rounds < 5:
@@ -280,22 +412,20 @@ class WSRelaySender:
                     continue
                 retransmit_rounds += 1
                 self._log(
-                    f"🌐 WS Relay: ретрансміт {len(missing)} чанків "
+                    f"🔄 Ретрансміт {len(missing)} чанків "
                     f"(раунд {retransmit_rounds})..."
                 )
                 with open(self._filepath, "rb") as f:
-                    for seq in missing:
+                    for seq_i in missing:
                         if self._cancelled:
-                            self._close()
                             return False
-                        f.seek(seq * WS_RELAY_CHUNK_SIZE)
-                        chunk = f.read(WS_RELAY_CHUNK_SIZE)
+                        f.seek(seq_i * VPS_CHUNK_SIZE)
+                        chunk = f.read(VPS_CHUNK_SIZE)
                         if chunk:
-                            self._send_dat(seq, chunk)
+                            self._send_dat(seq_i, chunk)
                 self._send_ctl(done_payload)
 
-        self._log("❌ WS Relay: таймаут очікування підтвердження")
-        self._close()
+        self._log("❌ Таймаут очікування підтвердження")
         return False
 
     # ── Send helpers ───────────────────────────────────────────────
@@ -304,7 +434,7 @@ class WSRelaySender:
         try:
             self._ws.send_binary(bytes([_CTL]) + self._crypto.encrypt(plaintext))
         except Exception as exc:
-            log.debug("WS send ctl error: %s", exc)
+            log.debug("VPS send ctl error: %s", exc)
 
     def _send_dat(self, seq: int, chunk: bytes) -> None:
         try:
@@ -313,21 +443,10 @@ class WSRelaySender:
             frame   = bytes([_DAT]) + struct.pack("!I", seq) + payload
             self._ws.send_binary(frame)
         except Exception as exc:
-            log.debug("WS send dat error: %s", exc)
-
-    def _ping_worker(self) -> None:
-        """Send WebSocket pings every 20s to keep CF Tunnel connection alive."""
-        while not self._ping_stop.is_set():
-            self._ping_stop.wait(timeout=20)
-            if self._ping_stop.is_set():
-                break
-            try:
-                self._ws.ping()
-            except Exception:
-                break
+            log.debug("VPS send dat error: %s", exc)
 
     def _recv_worker(self) -> None:
-        """Receive control frames from the receiver side (runs in background)."""
+        """Receive control frames from the receiver (runs in background)."""
         try:
             while True:
                 raw = self._ws.recv()
@@ -336,22 +455,13 @@ class WSRelaySender:
                 if isinstance(raw, bytes) and len(raw) >= 1 and raw[0] == _CTL:
                     try:
                         msg = json.loads(self._crypto.decrypt(raw[1:]))
-                        # Window ACK — unblock sender's flow control
-                        if msg.get("type") == "relay_window_ack":
-                            if hasattr(self, "_window_cond"):
-                                with self._window_cond:
-                                    self._window_acks_rcvd += 1
-                                    self._window_cond.notify_all()
-                        else:
-                            self._ctl_queue.put(msg)
+                        self._ctl_queue.put(msg)
                     except Exception as exc:
-                        log.debug("WS recv ctl decode error: %s", exc)
+                        log.debug("VPS recv ctl decode error: %s", exc)
         except Exception:
             pass
 
     def _close(self) -> None:
-        if hasattr(self, "_ping_stop"):
-            self._ping_stop.set()
         try:
             if self._ws:
                 self._ws.close()
@@ -359,39 +469,39 @@ class WSRelaySender:
             pass
 
     def _log(self, msg: str) -> None:
+        log.info("[Sender] %s", msg)
         if self.on_status:
             self.on_status(msg)
 
 
 # ════════════════════════════════════════════════════════════════════
-#  WSRelayReceiver
+#  VPSRelayReceiver
 # ════════════════════════════════════════════════════════════════════
 
-class WSRelayReceiver:
+class VPSRelayReceiver:
     """
-    Receive a file through the Cloudflare Tunnel relay.
+    Receive a file through the VPS relay server.
 
-    Connects to wss://{cloudflare_url}.
+    Handles the entire flow: connect → key exchange → verify → receive.
+    GUI only needs to provide callbacks for progress, status, and verification.
     """
 
     def __init__(
         self,
-        relay_url: str,              # wss://xyz.trycloudflare.com
         session_code: str,
         save_dir: str | Path,
-        crypto: CryptoSession,
         on_progress: Optional[ProgressCB] = None,
         on_status:   Optional[StatusCB]   = None,
+        on_verify:   Optional[VerifyCB]   = None,
     ):
-        # Convert http(s) → ws(s)
-        self._url     = relay_url.replace("https://", "wss://").replace("http://", "ws://")
-        self._code    = session_code
-        self._save_dir = Path(save_dir)
-        self._crypto  = crypto
+        self._code       = session_code
+        self._save_dir   = Path(save_dir)
         self.on_progress = on_progress
         self.on_status   = on_status
+        self.on_verify   = on_verify or (lambda code: True)
         self._cancelled  = False
         self._ws: Optional[websocket.WebSocket] = None
+        self._crypto: Optional[CryptoSession] = None
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -404,50 +514,68 @@ class WSRelayReceiver:
     # ── Public entry point ─────────────────────────────────────────
 
     def receive(self) -> Optional[Path]:
+        """
+        Connect to VPS, perform key exchange + verification, receive file.
+        Returns Path to saved file on success, None on failure/cancel.
+        """
         if not _HAS_WS:
-            self._log("❌ WS Relay: потрібен пакет websocket-client")
+            self._log("❌ Потрібен пакет websocket-client")
             return None
+        try:
+            return self._receive_impl()
+        except Exception as exc:
+            self._log(f"❌ Помилка: {exc}")
+            log.exception("VPSRelayReceiver error")
+            return None
+        finally:
+            self._close()
 
-        self._log("🌐 WS Relay: підключаюсь до relay...")
+    def _receive_impl(self) -> Optional[Path]:
+        # ── 1. Connect to VPS ─────────────────────────────────────
+        self._log("🌐 Підключаюсь до relay сервера...")
         try:
             self._ws = websocket.WebSocket()
-            self._ws.connect(self._url, timeout=30)
-            self._ws.settimeout(120)            # 120s recv timeout during transfer
-            self._ws.send(self._code)
+            self._ws.connect(VPS_RELAY_URL, timeout=30)
+            self._ws.settimeout(300)       # 5 min to wait for peer
+            self._ws.send(self._code)      # register session code
         except Exception as exc:
-            self._log(f"❌ WS Relay: помилка підключення: {exc}")
+            self._log(f"❌ Помилка підключення до relay: {exc}")
             return None
 
-        # Keepalive ping to prevent CF Tunnel idle timeout (every 20s)
-        _ping_stop = threading.Event()
-        def _ping_loop():
-            while not _ping_stop.is_set():
-                _ping_stop.wait(timeout=20)
-                if _ping_stop.is_set():
-                    break
-                try:
-                    self._ws.ping()
-                except Exception:
-                    break
-        threading.Thread(target=_ping_loop, daemon=True).start()
+        self._log("⏳ Чекаю відправника...")
 
-        self._log("🌐 WS Relay: чекаю метадані від відправника...")
+        # ── 2. Key exchange ───────────────────────────────────────
+        self._crypto = _do_key_exchange(self._ws, self._code, self.on_status)
+        if not self._crypto:
+            return None
 
-        # Transfer state
-        file_name:    Optional[str]  = None
-        file_size:    int            = 0
-        file_hash:    str            = ""
-        chunk_size:   int            = WS_RELAY_CHUNK_SIZE
-        total_chunks: int            = 0
-        received_seqs: set[int]      = set()
-        bytes_received: int          = 0
-        save_path:    Optional[Path] = None
-        temp_path:    Optional[Path] = None
-        out_file                     = None
+        # ── 3. Verification ───────────────────────────────────────
+        sig_key = derive_signaling_key(self._code)
+        self._ws.settimeout(120)           # tighten timeout for verification
+
+        if not _do_verification(
+            self._ws, self._crypto, sig_key, self.on_verify, self.on_status
+        ):
+            return None
+
+        # ── 4. Receive file ───────────────────────────────────────
+        self._log("⏳ Чекаю метадані від відправника...")
+        self._ws.settimeout(120)           # transfer timeout
+
+        file_name:     Optional[str]  = None
+        file_size:     int            = 0
+        file_hash:     str            = ""
+        chunk_size:    int            = VPS_CHUNK_SIZE
+        total_chunks:  int            = 0
+        received_seqs: set[int]       = set()
+        bytes_received: int           = 0
+        save_path:     Optional[Path] = None
+        temp_path:     Optional[Path] = None
+        out_file                      = None
         t0 = time.monotonic()
         last_prog = t0
 
-        # Async disk writer (keeps paho callback fast; same idea as mqtt relay)
+        # Async disk writer (keeps receive loop fast)
         write_queue: queue.Queue = queue.Queue(maxsize=512)
         writer_thread: Optional[threading.Thread] = None
 
@@ -500,7 +628,7 @@ class WSRelayReceiver:
                         file_name    = msg["name"]
                         file_size    = msg["size"]
                         file_hash    = msg["sha256"]
-                        chunk_size   = msg.get("chunk_size", WS_RELAY_CHUNK_SIZE)
+                        chunk_size   = msg.get("chunk_size", VPS_CHUNK_SIZE)
                         total_chunks = msg.get("total_chunks", 0)
 
                         save_path = self._save_dir / file_name
@@ -508,18 +636,18 @@ class WSRelayReceiver:
 
                         try:
                             out_file = open(temp_path, "w+b")
-                            # Pre-allocate to avoid fragmentation on large files
+                            # Pre-allocate to avoid fragmentation
                             if file_size > 0:
                                 out_file.seek(file_size - 1)
                                 out_file.write(b"\x00")
                                 out_file.flush()
                                 out_file.seek(0)
                         except Exception as exc:
-                            self._log(f"❌ WS Relay: не вдалось створити файл: {exc}")
+                            self._log(f"❌ Не вдалось створити файл: {exc}")
                             return None
 
                         writer_thread = threading.Thread(
-                            target=_writer, daemon=True, name="ws-relay-writer"
+                            target=_writer, daemon=True, name="vps-relay-writer"
                         )
                         writer_thread.start()
 
@@ -528,10 +656,12 @@ class WSRelayReceiver:
                             if file_size >= 1024**3
                             else f"{file_size / (1024**2):.1f} МБ"
                         )
-                        self._log(f"🌐 WS Relay: отримую {file_name} ({size_str})")
+                        self._log(f"📥 Отримую: {file_name} ({size_str})")
 
                         # Send meta ACK → sender starts streaming
-                        self._send_ctl(json.dumps({"type": "relay_meta_ack"}).encode())
+                        self._send_ctl(
+                            json.dumps({"type": "relay_meta_ack"}).encode()
+                        )
                         t0 = time.monotonic()
                         last_prog = t0
 
@@ -542,7 +672,7 @@ class WSRelayReceiver:
                         missing = sorted(set(range(total_chunks)) - received_seqs)
 
                         if missing:
-                            # Request retransmit in batches of 1000 indices
+                            # Request retransmit in batches
                             BATCH = 1000
                             for i in range(0, len(missing), BATCH):
                                 batch = missing[i: i + BATCH]
@@ -551,9 +681,8 @@ class WSRelayReceiver:
                                     "missing": batch,
                                 }).encode())
                             self._log(
-                                f"🌐 WS Relay: запитую ретрансміт {len(missing)} чанків..."
+                                f"🔄 Запитую ретрансміт {len(missing)} чанків..."
                             )
-                            # Continue receiving — sender will retransmit then re-send DONE
 
                         else:
                             # All chunks present → flush writer → verify
@@ -567,14 +696,14 @@ class WSRelayReceiver:
                             except Exception:
                                 pass
 
-                            self._log("🌐 WS Relay: перевірка SHA-256...")
+                            self._log("🔍 Перевірка SHA-256...")
                             verified = _sha256_file(temp_path) == file_hash
 
                             self._send_ctl(json.dumps({
                                 "type":     "relay_done_ack",
                                 "verified": verified,
                             }).encode())
-                            time.sleep(1)   # let ACK reach sender before closing
+                            time.sleep(1)  # let ACK reach sender before closing
 
                             if verified:
                                 if save_path.exists():
@@ -583,12 +712,12 @@ class WSRelayReceiver:
                                 elapsed = time.monotonic() - t0
                                 avg = file_size / elapsed if elapsed > 0 else 0
                                 self._log(
-                                    f"Збережено: {save_path} ✓  "
-                                    f"({avg / (1024*1024):.1f} МБ/с середня)"
+                                    f"✅ Збережено: {save_path.name} "
+                                    f"({avg / (1024*1024):.1f} МБ/с)"
                                 )
                                 return save_path
                             else:
-                                self._log("❌ WS Relay: хеш не збігається!")
+                                self._log("❌ Хеш не збігається!")
                                 temp_path.unlink(missing_ok=True)
                                 return None
 
@@ -610,12 +739,6 @@ class WSRelayReceiver:
                                 # Discard; retransmit will cover this slot
                                 received_seqs.discard(seq)
                                 bytes_received -= len(chunk)
-                            # Flow control: ACK every 128 chunks so sender
-                            # doesn't flood the relay buffer
-                            if len(received_seqs) % 128 == 0:
-                                self._send_ctl(
-                                    json.dumps({"type": "relay_window_ack"}).encode()
-                                )
                         except Exception:
                             pass  # corrupted → retransmit will cover it
 
@@ -629,8 +752,8 @@ class WSRelayReceiver:
                         last_prog = now
 
         except Exception as exc:
-            self._log(f"❌ WS Relay: {exc}")
-            log.exception("WSRelayReceiver error")
+            self._log(f"❌ Помилка: {exc}")
+            log.exception("VPSRelayReceiver error")
         finally:
             # Ensure writer thread is stopped
             try:
@@ -644,13 +767,8 @@ class WSRelayReceiver:
                     out_file.close()
                 except Exception:
                     pass
-            try:
-                self._ws.close()
-            except Exception:
-                pass
 
         # Arrived here on error or cancel
-        _ping_stop.set()
         if temp_path and temp_path.exists():
             temp_path.unlink(missing_ok=True)
         return None
@@ -661,8 +779,16 @@ class WSRelayReceiver:
         try:
             self._ws.send_binary(bytes([_CTL]) + self._crypto.encrypt(plaintext))
         except Exception as exc:
-            log.debug("WS recv-side send ctl: %s", exc)
+            log.debug("VPS recv-side send ctl: %s", exc)
+
+    def _close(self) -> None:
+        try:
+            if self._ws:
+                self._ws.close()
+        except Exception:
+            pass
 
     def _log(self, msg: str) -> None:
+        log.info("[Receiver] %s", msg)
         if self.on_status:
             self.on_status(msg)
