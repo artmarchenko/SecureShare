@@ -5,8 +5,8 @@ services:
     environment:
       - RELAY_HOST=0.0.0.0
       - RELAY_PORT=8765
-      - RELAY_MAX_CONN_PER_IP=10
-      - RELAY_RATE_LIMIT=20
+      - RELAY_MAX_CONN_PER_IP=50
+      - RELAY_RATE_LIMIT=200
       - RELAY_ROOM_TIMEOUT=1800
     networks:
       - web
