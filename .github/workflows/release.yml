@@ -77,6 +77,17 @@ jobs:
       - name: Install test dependencies
         run: pip install "websocket-client>=1.7.0"
 
+      - name: DNS warmup
+        run: |
+          for i in 1 2 3 4 5; do
+            if host secureshare-relay.duckdns.org > /dev/null 2>&1; then
+              echo "DNS resolved on attempt $i"
+              break
+            fi
+            echo "DNS attempt $i failed, retrying in ${i}s..."
+            sleep $i
+          done
+
       - name: Run server test suite
         run: python server/test_relay.py
 
