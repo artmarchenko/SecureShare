@@ -17,6 +17,12 @@ Protocol phases:
      Sender: metadata → chunks → done
      Receiver: meta_ack → done_ack (with SHA-256 result)
 
+     Resume support (v3.1):
+       After receiving relay_meta, the receiver checks for a matching
+       .resume manifest from a previous interrupted transfer.  If found,
+       relay_meta_ack includes resume=true + received_chunks list.
+       The sender then skips already-received chunks.
+
 Wire format:
   [1 byte type][payload]
 
@@ -25,8 +31,8 @@ Wire format:
   'D' (0x44)  data      : [4B seq BE] e2e_encrypt(compressed_chunk)
 
 Control message types (JSON field "type"):
-  relay_meta        sender → receiver   file info
-  relay_meta_ack    receiver → sender   ready to receive
+  relay_meta        sender → receiver   file info (+ transfer_id)
+  relay_meta_ack    receiver → sender   ready to receive (+ resume info)
   relay_done        sender → receiver   all chunks sent
   relay_done_ack    receiver → sender   SHA-256 result
   relay_retransmit  receiver → sender   list of missing chunk indices
@@ -60,6 +66,9 @@ from .config import (
     APP_VERSION,
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
+    RESUME_MANIFEST_EXT,
+    RESUME_MAX_AGE,
+    RESUME_SAVE_INTERVAL,
 )
 from .crypto_utils import (
     CryptoSession,
@@ -97,6 +106,93 @@ def _sha256_file(path: Path) -> str:
         while chunk := f.read(1024 * 1024):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _make_transfer_id(name: str, size: int, sha256: str) -> str:
+    """Deterministic transfer ID from file metadata.
+
+    Two independent sessions for the same file produce the same ID,
+    enabling the receiver to detect a resumable partial download.
+    """
+    raw = f"{name}|{size}|{sha256}".encode()
+    return hashlib.sha256(raw).hexdigest()[:32]
+
+
+# ── Resume manifest helpers ───────────────────────────────────────
+
+def _manifest_path(save_dir: Path, file_name: str) -> Path:
+    """Return the path to the .resume manifest for a given file."""
+    return save_dir / (file_name + ".part" + RESUME_MANIFEST_EXT)
+
+
+def _save_manifest(
+    path: Path,
+    transfer_id: str,
+    file_name: str,
+    file_size: int,
+    file_sha256: str,
+    chunk_size: int,
+    total_chunks: int,
+    received_chunks: set[int],
+) -> None:
+    """Persist the resume manifest to disk (atomic write)."""
+    data = {
+        "transfer_id":    transfer_id,
+        "file_name":      file_name,
+        "file_size":      file_size,
+        "file_sha256":    file_sha256,
+        "chunk_size":     chunk_size,
+        "total_chunks":   total_chunks,
+        "received_chunks": sorted(received_chunks),
+        "timestamp":      time.time(),
+    }
+    tmp = path.with_suffix(".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        tmp.replace(path)
+    except Exception as exc:
+        log.debug("Failed to save resume manifest: %s", exc)
+        tmp.unlink(missing_ok=True)
+
+
+def _load_manifest(
+    save_dir: Path, file_name: str, transfer_id: str
+) -> Optional[dict]:
+    """Load a matching resume manifest if it exists and is still valid.
+
+    Returns manifest dict with 'received_chunks' as a set, or None.
+    """
+    mpath = _manifest_path(save_dir, file_name)
+    if not mpath.exists():
+        return None
+    try:
+        with open(mpath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        mpath.unlink(missing_ok=True)
+        return None
+
+    # Validate transfer_id and age
+    if data.get("transfer_id") != transfer_id:
+        log.info("Resume manifest transfer_id mismatch — ignoring")
+        return None
+
+    age = time.time() - data.get("timestamp", 0)
+    if age > RESUME_MAX_AGE:
+        log.info("Resume manifest too old (%.0f h) — ignoring", age / 3600)
+        mpath.unlink(missing_ok=True)
+        return None
+
+    # Convert list → set for fast lookup
+    data["received_chunks"] = set(data.get("received_chunks", []))
+    return data
+
+
+def _delete_manifest(save_dir: Path, file_name: str) -> None:
+    """Remove the .resume manifest file."""
+    mpath = _manifest_path(save_dir, file_name)
+    mpath.unlink(missing_ok=True)
 
 
 # ── Key Exchange (common for sender and receiver) ─────────────────
@@ -370,6 +466,7 @@ class VPSRelaySender:
         self._log(f"🔍 Обчислюю хеш {file_name}...")
         file_hash    = _sha256_file(self._filepath)
         total_chunks = (file_size + VPS_CHUNK_SIZE - 1) // VPS_CHUNK_SIZE
+        transfer_id  = _make_transfer_id(file_name, file_size, file_hash)
 
         self._send_ctl(json.dumps({
             "type":         "relay_meta",
@@ -378,9 +475,10 @@ class VPSRelaySender:
             "sha256":       file_hash,
             "chunk_size":   VPS_CHUNK_SIZE,
             "total_chunks": total_chunks,
+            "transfer_id":  transfer_id,
         }).encode())
 
-        # Wait for meta ACK
+        # Wait for meta ACK (may include resume info)
         self._log("⏳ Чекаю підтвердження метаданих...")
         try:
             ack = self._ctl_queue.get(timeout=120)
@@ -391,22 +489,56 @@ class VPSRelaySender:
             self._log("❌ Неочікувана відповідь на метадані")
             return False
 
+        # ── 5b. Check if receiver requests resume ─────────────────
+        skip_chunks: set[int] = set()
+        resume_bytes = 0
+        if ack.get("resume"):
+            already = ack.get("received_chunks", [])
+            skip_chunks = set(already)
+            # Estimate bytes the receiver already has
+            resume_bytes = len(skip_chunks) * VPS_CHUNK_SIZE
+            # Correct for the last chunk which may be smaller
+            if total_chunks - 1 in skip_chunks:
+                last_chunk_size = file_size - (total_chunks - 1) * VPS_CHUNK_SIZE
+                resume_bytes = resume_bytes - VPS_CHUNK_SIZE + last_chunk_size
+            resume_bytes = min(resume_bytes, file_size)
+            self._log(
+                f"🔄 Відновлення: отримувач має {len(skip_chunks)}/{total_chunks} "
+                f"чанків ({resume_bytes / (1024**2):.1f} МБ)"
+            )
+
         # ── 6. Send file chunks ───────────────────────────────────
+        chunks_to_send = total_chunks - len(skip_chunks)
         size_str = (
             f"{file_size / (1024**3):.1f} ГБ"
             if file_size >= 1024**3
             else f"{file_size / (1024**2):.1f} МБ"
         )
-        self._log(f"📦 Надсилаю: {file_name} ({size_str})")
+        if skip_chunks:
+            self._log(
+                f"📦 Надсилаю: {file_name} ({size_str}) — "
+                f"{chunks_to_send} чанків залишилось"
+            )
+        else:
+            self._log(f"📦 Надсилаю: {file_name} ({size_str})")
 
         t0 = time.monotonic()
-        sent_bytes = 0
+        sent_bytes = resume_bytes   # start counting from resumed point
         last_prog  = t0
+
+        # Report initial progress (especially visible for resume)
+        if self.on_progress and resume_bytes > 0:
+            self.on_progress(sent_bytes, file_size, 0)
 
         with open(self._filepath, "rb") as f:
             for seq in range(total_chunks):
                 if self._cancelled:
                     return False
+
+                if seq in skip_chunks:
+                    # Skip already-received chunk — advance file position
+                    f.seek((seq + 1) * VPS_CHUNK_SIZE)
+                    continue
 
                 chunk = f.read(VPS_CHUNK_SIZE)
                 if not chunk:
@@ -417,19 +549,15 @@ class VPSRelaySender:
                 now = time.monotonic()
                 if self.on_progress and (now - last_prog >= 0.3):
                     elapsed = now - t0
-                    self.on_progress(
-                        sent_bytes, file_size,
-                        sent_bytes / elapsed if elapsed > 0 else 0,
-                    )
+                    speed = (sent_bytes - resume_bytes) / elapsed if elapsed > 0 else 0
+                    self.on_progress(sent_bytes, file_size, speed)
                     last_prog = now
 
         # Final progress
         if self.on_progress:
             elapsed = time.monotonic() - t0
-            self.on_progress(
-                sent_bytes, file_size,
-                sent_bytes / elapsed if elapsed > 0 else 0,
-            )
+            speed = (sent_bytes - resume_bytes) / elapsed if elapsed > 0 else 0
+            self.on_progress(sent_bytes, file_size, speed)
 
         # ── 7. Send DONE and wait for verification ────────────────
         done_payload = json.dumps({
@@ -616,16 +744,19 @@ class VPSRelayReceiver:
         self._log("⏳ Чекаю метадані від відправника...")
         self._ws.settimeout(120)           # transfer timeout
 
-        file_name:     Optional[str]  = None
-        file_size:     int            = 0
-        file_hash:     str            = ""
-        chunk_size:    int            = VPS_CHUNK_SIZE
-        total_chunks:  int            = 0
-        received_seqs: set[int]       = set()
-        bytes_received: int           = 0
-        save_path:     Optional[Path] = None
-        temp_path:     Optional[Path] = None
-        out_file                      = None
+        file_name:      Optional[str]  = None
+        file_size:      int            = 0
+        file_hash:      str            = ""
+        transfer_id:    str            = ""
+        chunk_size:     int            = VPS_CHUNK_SIZE
+        total_chunks:   int            = 0
+        received_seqs:  set[int]       = set()
+        bytes_received: int            = 0
+        save_path:      Optional[Path] = None
+        temp_path:      Optional[Path] = None
+        out_file                       = None
+        is_resume:      bool           = False
+        chunks_since_save: int         = 0
         t0 = time.monotonic()
         last_prog = t0
 
@@ -684,21 +815,65 @@ class VPSRelayReceiver:
                         file_hash    = msg["sha256"]
                         chunk_size   = msg.get("chunk_size", VPS_CHUNK_SIZE)
                         total_chunks = msg.get("total_chunks", 0)
+                        transfer_id  = msg.get("transfer_id", "")
 
                         save_path = self._save_dir / file_name
                         temp_path = save_path.with_suffix(save_path.suffix + ".part")
 
-                        try:
-                            out_file = open(temp_path, "w+b")
-                            # Pre-allocate to avoid fragmentation
-                            if file_size > 0:
-                                out_file.seek(file_size - 1)
-                                out_file.write(b"\x00")
-                                out_file.flush()
-                                out_file.seek(0)
-                        except Exception as exc:
-                            self._log(f"❌ Не вдалось створити файл: {exc}")
-                            return None
+                        # ── Resume detection ──────────────────────
+                        manifest = None
+                        if transfer_id:
+                            manifest = _load_manifest(
+                                self._save_dir, file_name, transfer_id
+                            )
+
+                        if (
+                            manifest
+                            and temp_path.exists()
+                            and manifest.get("chunk_size") == chunk_size
+                            and manifest.get("total_chunks") == total_chunks
+                        ):
+                            # Resume: reuse existing .part file
+                            is_resume = True
+                            received_seqs = manifest["received_chunks"]
+                            bytes_received = len(received_seqs) * chunk_size
+                            # Correct for last chunk size
+                            if total_chunks - 1 in received_seqs:
+                                last_sz = file_size - (total_chunks - 1) * chunk_size
+                                bytes_received = bytes_received - chunk_size + last_sz
+                            bytes_received = min(bytes_received, file_size)
+
+                            try:
+                                out_file = open(temp_path, "r+b")
+                            except Exception as exc:
+                                self._log(f"❌ Не вдалось відкрити .part: {exc}")
+                                # Fall back to fresh transfer
+                                is_resume = False
+                                received_seqs = set()
+                                bytes_received = 0
+
+                            if is_resume:
+                                self._log(
+                                    f"🔄 Відновлення: знайдено {len(received_seqs)}/"
+                                    f"{total_chunks} чанків "
+                                    f"({bytes_received / (1024**2):.1f} МБ)"
+                                )
+
+                        if not is_resume:
+                            # Fresh transfer
+                            received_seqs = set()
+                            bytes_received = 0
+                            try:
+                                out_file = open(temp_path, "w+b")
+                                # Pre-allocate to avoid fragmentation
+                                if file_size > 0:
+                                    out_file.seek(file_size - 1)
+                                    out_file.write(b"\x00")
+                                    out_file.flush()
+                                    out_file.seek(0)
+                            except Exception as exc:
+                                self._log(f"❌ Не вдалось створити файл: {exc}")
+                                return None
 
                         writer_thread = threading.Thread(
                             target=_writer, daemon=True, name="vps-relay-writer"
@@ -710,14 +885,28 @@ class VPSRelayReceiver:
                             if file_size >= 1024**3
                             else f"{file_size / (1024**2):.1f} МБ"
                         )
-                        self._log(f"📥 Отримую: {file_name} ({size_str})")
+                        if is_resume:
+                            pct = bytes_received / file_size * 100 if file_size else 0
+                            self._log(
+                                f"📥 Відновлюю: {file_name} ({size_str}) — "
+                                f"{pct:.0f}% вже є"
+                            )
+                        else:
+                            self._log(f"📥 Отримую: {file_name} ({size_str})")
 
-                        # Send meta ACK → sender starts streaming
-                        self._send_ctl(
-                            json.dumps({"type": "relay_meta_ack"}).encode()
-                        )
+                        # Send meta ACK (with resume info if applicable)
+                        ack_msg: dict = {"type": "relay_meta_ack"}
+                        if is_resume and received_seqs:
+                            ack_msg["resume"] = True
+                            ack_msg["received_chunks"] = sorted(received_seqs)
+
+                        self._send_ctl(json.dumps(ack_msg).encode())
                         t0 = time.monotonic()
                         last_prog = t0
+
+                        # Show initial progress for resume
+                        if self.on_progress and is_resume:
+                            self.on_progress(bytes_received, file_size, 0)
 
                     elif t == "relay_done":
                         total_chunks = msg.get("total_chunks", total_chunks)
@@ -726,6 +915,14 @@ class VPSRelayReceiver:
                         missing = sorted(set(range(total_chunks)) - received_seqs)
 
                         if missing:
+                            # Save manifest before retransmit request
+                            if file_name and transfer_id:
+                                _save_manifest(
+                                    _manifest_path(self._save_dir, file_name),
+                                    transfer_id, file_name, file_size,
+                                    file_hash, chunk_size, total_chunks,
+                                    received_seqs,
+                                )
                             # Request retransmit in batches
                             BATCH = 1000
                             for i in range(0, len(missing), BATCH):
@@ -760,6 +957,8 @@ class VPSRelayReceiver:
                             time.sleep(1)  # let ACK reach sender before closing
 
                             if verified:
+                                # Success → clean up resume manifest
+                                _delete_manifest(self._save_dir, file_name)
                                 if save_path.exists():
                                     save_path.unlink()
                                 temp_path.rename(save_path)
@@ -772,6 +971,7 @@ class VPSRelayReceiver:
                                 return save_path
                             else:
                                 self._log("❌ Хеш не збігається!")
+                                _delete_manifest(self._save_dir, file_name)
                                 temp_path.unlink(missing_ok=True)
                                 return None
 
@@ -787,14 +987,29 @@ class VPSRelayReceiver:
                             chunk = _decompress(self._crypto.decrypt(enc_data))
                             received_seqs.add(seq)
                             bytes_received += len(chunk)
+                            chunks_since_save += 1
                             try:
                                 write_queue.put_nowait((seq, chunk))
                             except queue.Full:
                                 # Discard; retransmit will cover this slot
                                 received_seqs.discard(seq)
                                 bytes_received -= len(chunk)
+                                chunks_since_save -= 1
                         except Exception:
                             pass  # corrupted → retransmit will cover it
+
+                    # Periodically save resume manifest
+                    if (
+                        chunks_since_save >= RESUME_SAVE_INTERVAL
+                        and file_name and transfer_id
+                    ):
+                        _save_manifest(
+                            _manifest_path(self._save_dir, file_name),
+                            transfer_id, file_name, file_size,
+                            file_hash, chunk_size, total_chunks,
+                            received_seqs,
+                        )
+                        chunks_since_save = 0
 
                     now = time.monotonic()
                     if self.on_progress and file_size and (now - last_prog >= 0.5):
@@ -822,9 +1037,23 @@ class VPSRelayReceiver:
                 except Exception:
                     pass
 
-        # Arrived here on error or cancel
-        if temp_path and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+            # Save resume manifest on interruption (if we have partial data)
+            if (
+                file_name and transfer_id and received_seqs
+                and len(received_seqs) < total_chunks
+            ):
+                self._log(
+                    f"💾 Збережено прогрес: {len(received_seqs)}/{total_chunks} "
+                    f"чанків — можна відновити"
+                )
+                _save_manifest(
+                    _manifest_path(self._save_dir, file_name),
+                    transfer_id, file_name, file_size,
+                    file_hash, chunk_size, total_chunks,
+                    received_seqs,
+                )
+
+        # Arrived here on error or cancel — keep .part + .resume for later
         return None
 
     # ── Send helper ────────────────────────────────────────────────
