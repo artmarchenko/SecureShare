@@ -40,6 +40,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./downloads:/downloads:ro
+      - ./www:/www:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
