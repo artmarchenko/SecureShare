@@ -2,7 +2,7 @@
 
 > Comprehensive technical documentation for developers, auditors, and contributors.
 >
-> **Version:** 3.0 · **Architecture:** VPS-only relay · **Author:** Artem Marchenko
+> **Version:** 3.2 · **Architecture:** VPS-only relay · **Author:** Artem Marchenko
 
 ---
 
@@ -192,7 +192,8 @@ Even if one layer is compromised, the others provide protection:
                      │      type: "pub_key",                  │
                      │      key: <X25519 pub>,                │
                      │      protocol_version: 1,              │
-                     │      app_version: "3.0.0"              │
+                     │      app_version: "3.2.0",             │
+                     │      reconnect_token: <opt>            │
                      │    }) ─────────────────────────────────►│
                      │                                        │
                      │◄─────────────────────────────────────── │ 3. Send: signaling_encrypt({
@@ -313,7 +314,7 @@ Every WebSocket message has a 1-byte type prefix:
 ```
 
 JSON payload types:
-- `{"type": "pub_key", "key": "<base64>", "protocol_version": 1, "app_version": "3.0.0"}`
+- `{"type": "pub_key", "key": "<base64>", "protocol_version": 1, "app_version": "3.2.0", "reconnect_token": "<base64>"}` *(reconnect_token is optional, present on reconnect)*
 - `{"type": "verified"}`
 - `{"type": "verify_reject"}`
 
@@ -330,8 +331,8 @@ JSON payload types:
 
 | Type | Direction | Fields |
 |------|-----------|--------|
-| `relay_meta` | Sender → Receiver | `name`, `size`, `sha256`, `chunk_size`, `total_chunks` |
-| `relay_meta_ack` | Receiver → Sender | *(empty)* |
+| `relay_meta` | Sender → Receiver | `name`, `size`, `sha256`, `chunk_size`, `total_chunks`, `transfer_id` |
+| `relay_meta_ack` | Receiver → Sender | `resume` (bool, opt), `received_chunks` (list, opt) |
 | `relay_done` | Sender → Receiver | `sha256`, `total_chunks` |
 | `relay_done_ack` | Receiver → Sender | `verified` (bool) |
 | `relay_retransmit` | Receiver → Sender | `missing` (list of chunk indices) |
@@ -407,6 +408,55 @@ After receiving `relay_done`, the receiver checks for missing chunks:
 
 This handles packet loss or processing failures without requiring the full file to be re-sent.
 
+### 4.8. Resume Protocol (v3.1)
+
+If a transfer is interrupted (network loss, user cancel), the receiver saves a `.resume` manifest file alongside the `.part` temporary file. The manifest contains:
+
+```json
+{
+  "transfer_id": "<sha256(name|size|hash)[:32]>",
+  "file_name": "example.zip",
+  "file_size": 104857600,
+  "file_sha256": "abc...",
+  "chunk_size": 524288,
+  "total_chunks": 200,
+  "received_chunks": [0, 1, 2, 3, ...],
+  "timestamp": 1708000000.0
+}
+```
+
+On the next transfer of the **same file** (any session code):
+1. Sender includes `transfer_id` in `relay_meta`
+2. Receiver matches `transfer_id` against existing `.resume` manifest
+3. If matched → sends `relay_meta_ack` with `resume: true` and `received_chunks` list
+4. Sender skips already-received chunks
+5. Manifests auto-expire after 7 days (`RESUME_MAX_AGE`)
+
+### 4.9. Auto-Reconnect Protocol (v3.2)
+
+On connection loss **during an active transfer**, both sender and receiver automatically attempt to reconnect (up to `RECONNECT_MAX_RETRIES` attempts with exponential backoff).
+
+**Reconnect token** (identity proof across reconnects):
+```
+reconnect_token = HMAC-SHA256(shared_key, session_code + "secureshare-reconnect-v1")[:16]
+```
+
+After successful verification, both sides compute and store this token. On reconnect:
+
+1. Both peers independently detect the disconnect
+2. Wait with exponential backoff: 5s → 10s → 20s → 40s → 60s
+3. Reconnect to relay with the **same session code**
+4. New X25519 key exchange (includes `reconnect_token` in signaling message)
+5. If peer's `reconnect_token` matches our stored token → **auto-verify** (skip popup)
+6. If tokens don't match → full verification with user interaction
+7. Sender re-sends `relay_meta` → receiver responds with resume info → transfer continues
+
+**Security model:**
+- The reconnect token proves the peer participated in the original key exchange
+- An attacker would need the previous shared key to forge the token
+- The token is encrypted with the signaling key (derived from session code)
+- If the token doesn't match, full verification is required (safe fallback)
+
 ---
 
 ## 5. Client Application
@@ -415,9 +465,9 @@ This handles packet loss or processing failures without requiring the full file 
 
 | Module | Lines | Responsibility |
 |--------|-------|---------------|
-| `config.py` | ~22 | Constants: relay URL, chunk size, version, limits |
+| `config.py` | ~30 | Constants: relay URL, chunk size, version, limits, reconnect/resume |
 | `crypto_utils.py` | ~191 | All cryptography: X25519, AES-GCM, HKDF, signaling |
-| `ws_relay.py` | ~849 | `VPSRelaySender` and `VPSRelayReceiver` classes |
+| `ws_relay.py` | ~1280 | `VPSRelaySender` and `VPSRelayReceiver` with auto-reconnect + resume |
 | `gui.py` | ~1200 | CustomTkinter GUI, threading, transfer orchestration |
 | `main.py` | ~49 | Entry point, logging setup |
 
@@ -439,6 +489,7 @@ This handles packet loss or processing failures without requiring the full file 
 │                                                      │
 │  VPSRelaySender.send() or VPSRelayReceiver.receive() │
 │  • Blocking WebSocket I/O                            │
+│  • Auto-reconnect loop (up to 5 retries)             │
 │  • Calls on_progress / on_status callbacks           │
 │  • Callbacks use self.after() to update GUI safely   │
 └──────────────────────┬───────────────────────────────┘
@@ -719,8 +770,14 @@ git push origin main --tags
 | `PROTOCOL_VERSION` | `1` | Current wire protocol version |
 | `MIN_PROTOCOL_VERSION` | `1` | Minimum compatible version |
 | `SESSION_CODE_LENGTH` | `8` | Length of session code |
+| `RESUME_MANIFEST_EXT` | `".resume"` | Resume manifest file extension |
+| `RESUME_MAX_AGE` | `604800` (7 days) | Max age for resume manifests |
+| `RESUME_SAVE_INTERVAL` | `64` | Save manifest every N chunks |
+| `RECONNECT_MAX_RETRIES` | `5` | Max auto-reconnect attempts |
+| `RECONNECT_BASE_DELAY` | `5` | Base delay (seconds, exponential backoff) |
+| `RECONNECT_MAX_DELAY` | `60` | Max delay cap (seconds) |
 | `APP_NAME` | `"SecureShare"` | Application name |
-| `APP_VERSION` | `"3.0.0"` | Application version |
+| `APP_VERSION` | `"3.2.0"` | Application version |
 
 ### 9.2. Server (`relay_server.py`, via env vars)
 
@@ -865,7 +922,6 @@ Secrets configured in repository settings:
 | **5 GB per session** | Server-enforced to prevent abuse on free VPS | Split large files; use archives |
 | **One file per session** | Protocol design for simplicity | Use ZIP/TAR for multiple files |
 | **Windows only** | CustomTkinter + PyInstaller target Windows | Run from source on macOS/Linux |
-| **No resumable transfers** | Session is ephemeral | Re-send if interrupted |
 | **Single relay server** | Architecture choice | Can deploy additional relays |
 | **No offline mode** | Relay-dependent architecture | Both users must be online |
 
@@ -908,4 +964,4 @@ Secrets configured in repository settings:
 
 ---
 
-*Last updated: February 2026*
+*Last updated: February 2026 · v3.2*
