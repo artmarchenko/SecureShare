@@ -26,7 +26,14 @@ _handlers: list[logging.Handler] = [
 
 # Add console handler only when stdout is available (python, not pythonw)
 if sys.stdout is not None and hasattr(sys.stdout, "write"):
-    _handlers.append(logging.StreamHandler(sys.stdout))
+    _console = logging.StreamHandler(sys.stdout)
+    # Prevent UnicodeEncodeError on Windows cp1252 consoles (emoji → ?)
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(errors="replace")
+        except Exception:
+            pass
+    _handlers.append(_console)
 
 logging.basicConfig(
     level=logging.INFO,
