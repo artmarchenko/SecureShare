@@ -17,6 +17,11 @@ MIN_PROTOCOL_VERSION = 1   # minimum compatible version (reject older)
 # ── Session ────────────────────────────────────────────────────────
 SESSION_CODE_LENGTH = 8
 
+# ── Resume ─────────────────────────────────────────────────────────
+RESUME_MANIFEST_EXT  = ".resume"          # manifest file extension
+RESUME_MAX_AGE       = 7 * 24 * 3600      # 7 days — auto-cleanup
+RESUME_SAVE_INTERVAL = 64                 # save manifest every N chunks
+
 # ── App ────────────────────────────────────────────────────────────
 APP_NAME = "SecureShare"
-APP_VERSION = "3.0.5"
+APP_VERSION = "3.1.0"
