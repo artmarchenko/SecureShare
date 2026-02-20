@@ -29,4 +29,4 @@ RECONNECT_MAX_DELAY   = 60                # seconds cap
 
 # ── App ────────────────────────────────────────────────────────────
 APP_NAME = "SecureShare"
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.1"
