@@ -23,6 +23,9 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+import socket
+from urllib.parse import urlparse
+
 try:
     import websocket
 except ImportError:
@@ -33,6 +36,7 @@ except ImportError:
 
 DEFAULT_URL = "wss://secureshare-relay.duckdns.org"
 TIMEOUT = 30  # longer timeout for resilience
+DNS_RETRIES = 3  # retry DNS resolution before giving up
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -45,7 +49,23 @@ def random_bytes(size: int) -> bytes:
     return os.urandom(size)
 
 
+def _resolve_host(hostname: str, retries: int = DNS_RETRIES) -> None:
+    """Pre-resolve DNS with retries to handle transient failures."""
+    for attempt in range(retries):
+        try:
+            socket.getaddrinfo(hostname, None, socket.AF_INET)
+            return
+        except socket.gaierror:
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+    raise socket.gaierror(f"DNS resolution failed for {hostname} after {retries} attempts")
+
+
 def connect(url: str, timeout: float = TIMEOUT) -> websocket.WebSocket:
+    """Connect with DNS retry to handle transient DuckDNS failures."""
+    hostname = urlparse(url).hostname
+    if hostname:
+        _resolve_host(hostname)
     return websocket.create_connection(url, timeout=timeout)
 
 
@@ -671,6 +691,17 @@ def main():
         for t in tests:
             print(f"  {t}")
         return
+
+    # DNS warmup — DuckDNS can be slow on CI runners
+    hostname = urlparse(args.url).hostname
+    if hostname:
+        print(f"  DNS warmup: {hostname} ...", end=" ", flush=True)
+        try:
+            _resolve_host(hostname, retries=5)
+            print("OK")
+        except socket.gaierror as e:
+            print(f"FAILED: {e}")
+            print("  (DNS not resolving — tests will likely fail)")
 
     tester = RelayTester(args.url)
     results = tester.run_all(only=args.only)
