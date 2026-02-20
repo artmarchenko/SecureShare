@@ -10,9 +10,11 @@ All data is E2E encrypted — the server never inspects content.
 Protocol phases:
   1. Key Exchange + Version Negotiation (signaling-encrypted)
      Both sides send X25519 public key + protocol_version + app_version.
+     Optionally includes reconnect_token for auto-reconnect.
      If versions are incompatible → clear error message → abort.
   2. Verification (signaling-encrypted)
      Both sides confirm verification code matches (user interaction).
+     On auto-reconnect: skipped if reconnect_token matches.
   3. File Transfer (E2E encrypted with derived key)
      Sender: metadata → chunks → done
      Receiver: meta_ack → done_ack (with SHA-256 result)
@@ -22,6 +24,12 @@ Protocol phases:
        .resume manifest from a previous interrupted transfer.  If found,
        relay_meta_ack includes resume=true + received_chunks list.
        The sender then skips already-received chunks.
+
+     Auto-reconnect (v3.2):
+       On connection loss during transfer, both sides automatically
+       reconnect with the same session code, re-do key exchange,
+       skip verification (reconnect_token proves identity), and
+       resume the transfer.
 
 Wire format:
   [1 byte type][payload]
@@ -42,6 +50,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import queue
@@ -69,6 +78,9 @@ from .config import (
     RESUME_MANIFEST_EXT,
     RESUME_MAX_AGE,
     RESUME_SAVE_INTERVAL,
+    RECONNECT_MAX_RETRIES,
+    RECONNECT_BASE_DELAY,
+    RECONNECT_MAX_DELAY,
 )
 from .crypto_utils import (
     CryptoSession,
@@ -116,6 +128,24 @@ def _make_transfer_id(name: str, size: int, sha256: str) -> str:
     """
     raw = f"{name}|{size}|{sha256}".encode()
     return hashlib.sha256(raw).hexdigest()[:32]
+
+
+# ── Reconnect token ──────────────────────────────────────────────
+
+def _make_reconnect_token(shared_key: bytes, session_code: str) -> str:
+    """Derive a reconnect token from the DH shared key.
+
+    Both peers compute the same token after key exchange.  On
+    reconnect, including this token in the key-exchange message
+    proves that the peer participated in the original session
+    → verification popup can be safely skipped.
+    """
+    raw = hmac.new(
+        shared_key,
+        session_code.encode() + b"secureshare-reconnect-v1",
+        hashlib.sha256,
+    ).digest()[:16]
+    return base64.b64encode(raw).decode()
 
 
 # ── Resume manifest helpers ───────────────────────────────────────
@@ -201,7 +231,8 @@ def _do_key_exchange(
     ws,
     session_code: str,
     on_status: Optional[StatusCB],
-) -> Optional[CryptoSession]:
+    reconnect_token: Optional[str] = None,
+) -> tuple[Optional[CryptoSession], Optional[str]]:
     """
     Perform X25519 key exchange over the WebSocket with version negotiation.
 
@@ -209,23 +240,26 @@ def _do_key_exchange(
     (signaling-encrypted).  The VPS relay pipes A→B and B→A, so each
     side receives the other's key.
 
-    Version check:
-      - If peer's protocol_version < our MIN_PROTOCOL_VERSION → reject
-      - If peer's protocol_version is missing → treat as version 0
+    If reconnect_token is provided, it is included in the signaling
+    message so the peer can verify the reconnect without a popup.
 
-    Returns CryptoSession with derived shared key, or None on failure.
+    Returns (CryptoSession, peer_reconnect_token) or (None, None).
     """
     crypto = CryptoSession(session_code)
     sig_key = derive_signaling_key(session_code)
 
-    # Send our public key + version info
+    # Send our public key + version info + optional reconnect token
     pub_key_b64 = base64.b64encode(crypto.get_public_key_bytes()).decode()
-    sig_payload = json.dumps({
+    msg: dict = {
         "type":             "pub_key",
         "key":              pub_key_b64,
         "protocol_version": PROTOCOL_VERSION,
         "app_version":      APP_VERSION,
-    }).encode()
+    }
+    if reconnect_token:
+        msg["reconnect_token"] = reconnect_token
+
+    sig_payload = json.dumps(msg).encode()
     ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, sig_payload))
 
     if on_status:
@@ -237,24 +271,24 @@ def _do_key_exchange(
     except Exception as e:
         if on_status:
             on_status(f"❌ Помилка обміну ключами: {e}")
-        return None
+        return None, None
 
     if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
         if on_status:
             on_status("❌ Невірний формат обміну ключами")
-        return None
+        return None, None
 
     try:
         peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
     except Exception:
         if on_status:
             on_status("❌ Помилка розшифрування ключа партнера")
-        return None
+        return None, None
 
     if peer_msg.get("type") != "pub_key" or "key" not in peer_msg:
         if on_status:
             on_status("❌ Невірне повідомлення обміну ключами")
-        return None
+        return None, None
 
     # ── Version compatibility check ─────────────────────────────
     peer_proto = peer_msg.get("protocol_version", 0)
@@ -277,7 +311,7 @@ def _do_key_exchange(
                 f"потрібно v{MIN_PROTOCOL_VERSION}+). "
                 f"Попросіть партнера оновити програму."
             )
-        return None
+        return None, None
 
     if PROTOCOL_VERSION < peer_proto:
         # Peer requires a newer protocol — we might be too old
@@ -296,7 +330,8 @@ def _do_key_exchange(
     peer_pub_key = base64.b64decode(peer_msg["key"])
     crypto.derive_shared_key(peer_pub_key)
 
-    return crypto
+    peer_reconnect_token = peer_msg.get("reconnect_token")
+    return crypto, peer_reconnect_token
 
 
 def _do_verification(
@@ -305,14 +340,47 @@ def _do_verification(
     sig_key: bytes,
     on_verify: VerifyCB,
     on_status: Optional[StatusCB],
+    auto_verify: bool = False,
 ) -> bool:
     """
     Show verification code and exchange confirmation with peer.
+
+    If auto_verify is True (reconnect scenario), skip the user popup
+    and auto-confirm.  Both sides still exchange 'verified' messages.
 
     Returns True if both sides verified successfully.
     """
     verification_code = crypto.get_verification_code()
 
+    if auto_verify:
+        if on_status:
+            on_status("🔄 Авто-верифікація (перепідключення)")
+        # Send confirmation without user interaction
+        confirm_payload = json.dumps({"type": "verified"}).encode()
+        ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, confirm_payload))
+
+        try:
+            raw = ws.recv()
+        except Exception as e:
+            if on_status:
+                on_status(f"❌ Помилка авто-верифікації: {e}")
+            return False
+
+        if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
+            return False
+
+        try:
+            peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
+        except Exception:
+            return False
+
+        if peer_msg.get("type") == "verified":
+            if on_status:
+                on_status("✅ Авто-верифікацію підтверджено")
+            return True
+        return False
+
+    # ── Normal verification (user interaction) ────────────────
     if on_status:
         on_status(f"🔑 Код верифікації: {verification_code}")
 
@@ -380,6 +448,7 @@ class VPSRelaySender:
     Send a file through the VPS relay server.
 
     Handles the entire flow: connect → key exchange → verify → transfer.
+    Supports auto-reconnect on connection loss during transfer.
     GUI only needs to provide callbacks for progress, status, and verification.
     """
 
@@ -400,37 +469,98 @@ class VPSRelaySender:
         self._ws: Optional[websocket.WebSocket] = None
         self._crypto: Optional[CryptoSession] = None
         self._ctl_queue: queue.Queue = queue.Queue()
+        self._connection_lost = threading.Event()
+
+        # Cached file metadata (computed once, reused across reconnects)
+        self._file_hash: Optional[str] = None
+        self._transfer_id: Optional[str] = None
+        self._reconnect_token: Optional[str] = None
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._connection_lost.set()
         try:
             if self._ws:
                 self._ws.close()
         except Exception:
             pass
 
-    # ── Public entry point ─────────────────────────────────────────
+    # ── Public entry point (with auto-reconnect) ──────────────────
 
     def send(self) -> bool:
         """
         Connect to VPS, perform key exchange + verification, send file.
+        Auto-reconnects on connection loss (up to RECONNECT_MAX_RETRIES).
         Returns True on success, False on failure/cancel.
         """
         if not _HAS_WS:
             self._log("❌ Потрібен пакет websocket-client")
             return False
-        try:
-            return self._send_impl()
-        except Exception as exc:
-            self._log(f"❌ Помилка: {exc}")
-            log.exception("VPSRelaySender error")
-            return False
-        finally:
-            self._close()
 
-    def _send_impl(self) -> bool:
+        # Pre-compute file metadata once (expensive for large files)
+        try:
+            file_name = self._filepath.name
+            file_size = self._filepath.stat().st_size
+            self._log(f"🔍 Обчислюю хеш {file_name}...")
+            self._file_hash = _sha256_file(self._filepath)
+            self._transfer_id = _make_transfer_id(
+                file_name, file_size, self._file_hash
+            )
+        except Exception as exc:
+            self._log(f"❌ Помилка читання файлу: {exc}")
+            return False
+
+        for attempt in range(RECONNECT_MAX_RETRIES + 1):
+            if self._cancelled:
+                return False
+
+            if attempt > 0:
+                delay = min(
+                    RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
+                    RECONNECT_MAX_DELAY,
+                )
+                self._log(
+                    f"🔄 Перепідключення через {delay:.0f}с "
+                    f"(спроба {attempt}/{RECONNECT_MAX_RETRIES})..."
+                )
+                time.sleep(delay)
+                if self._cancelled:
+                    return False
+
+            self._connection_lost.clear()
+            self._ctl_queue = queue.Queue()
+
+            try:
+                result = self._send_attempt(is_reconnect=(attempt > 0))
+                if result is True:
+                    return True
+                if result is False:
+                    # Permanent failure (cancel, verification rejected, etc.)
+                    return False
+                # result is None → connection lost, retry
+                self._log("⚠️ З'єднання втрачено")
+            except Exception as exc:
+                self._log(f"❌ Помилка: {exc}")
+                log.exception("VPSRelaySender error")
+            finally:
+                self._close()
+
+        self._log("❌ Вичерпано спроби перепідключення")
+        return False
+
+    def _send_attempt(self, is_reconnect: bool = False) -> Optional[bool]:
+        """Single send attempt.
+
+        Returns:
+          True  — success
+          False — permanent failure (don't retry)
+          None  — connection lost (can retry)
+        """
         # ── 1. Connect to VPS ─────────────────────────────────────
-        self._log("🌐 Підключаюсь до relay сервера...")
+        if is_reconnect:
+            self._log("🌐 Перепідключаюсь до relay сервера...")
+        else:
+            self._log("🌐 Підключаюсь до relay сервера...")
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(VPS_RELAY_URL, timeout=30)
@@ -438,44 +568,61 @@ class VPSRelaySender:
             self._ws.send(self._code)      # register session code
         except Exception as exc:
             self._log(f"❌ Помилка підключення до relay: {exc}")
-            return False
+            return None if is_reconnect else False
 
         self._log("⏳ Чекаю отримувача...")
 
         # ── 2. Key exchange ───────────────────────────────────────
-        self._crypto = _do_key_exchange(self._ws, self._code, self.on_status)
+        self._crypto, peer_token = _do_key_exchange(
+            self._ws, self._code, self.on_status,
+            reconnect_token=self._reconnect_token,
+        )
         if not self._crypto:
-            return False
+            return None if is_reconnect else False
+
+        # Compute reconnect token from NEW shared key
+        new_token = _make_reconnect_token(
+            self._crypto._shared_key, self._code
+        )
 
         # ── 3. Verification ───────────────────────────────────────
         sig_key = derive_signaling_key(self._code)
-        self._ws.settimeout(120)           # tighten timeout for verification
+        self._ws.settimeout(120)
+
+        # Auto-verify on reconnect if peer sent a matching token
+        auto_verify = (
+            is_reconnect
+            and self._reconnect_token is not None
+            and peer_token == self._reconnect_token
+        )
 
         if not _do_verification(
-            self._ws, self._crypto, sig_key, self.on_verify, self.on_status
+            self._ws, self._crypto, sig_key,
+            self.on_verify, self.on_status,
+            auto_verify=auto_verify,
         ):
-            return False
+            return False  # verification rejected = permanent failure
+
+        # Save reconnect token (from the NEW key exchange)
+        self._reconnect_token = new_token
 
         # ── 4. Start background receiver ──────────────────────────
         recv_thread = threading.Thread(target=self._recv_worker, daemon=True)
         recv_thread.start()
 
-        # ── 5. Hash file and send metadata ────────────────────────
-        file_name = self._filepath.name
-        file_size = self._filepath.stat().st_size
-        self._log(f"🔍 Обчислюю хеш {file_name}...")
-        file_hash    = _sha256_file(self._filepath)
+        # ── 5. Send metadata ──────────────────────────────────────
+        file_name    = self._filepath.name
+        file_size    = self._filepath.stat().st_size
         total_chunks = (file_size + VPS_CHUNK_SIZE - 1) // VPS_CHUNK_SIZE
-        transfer_id  = _make_transfer_id(file_name, file_size, file_hash)
 
         self._send_ctl(json.dumps({
             "type":         "relay_meta",
             "name":         file_name,
             "size":         file_size,
-            "sha256":       file_hash,
+            "sha256":       self._file_hash,
             "chunk_size":   VPS_CHUNK_SIZE,
             "total_chunks": total_chunks,
-            "transfer_id":  transfer_id,
+            "transfer_id":  self._transfer_id,
         }).encode())
 
         # Wait for meta ACK (may include resume info)
@@ -484,10 +631,10 @@ class VPSRelaySender:
             ack = self._ctl_queue.get(timeout=120)
         except queue.Empty:
             self._log("❌ Таймаут метаданих")
-            return False
+            return None  # retryable
         if ack.get("type") != "relay_meta_ack":
             self._log("❌ Неочікувана відповідь на метадані")
-            return False
+            return None
 
         # ── 5b. Check if receiver requests resume ─────────────────
         skip_chunks: set[int] = set()
@@ -495,9 +642,7 @@ class VPSRelaySender:
         if ack.get("resume"):
             already = ack.get("received_chunks", [])
             skip_chunks = set(already)
-            # Estimate bytes the receiver already has
             resume_bytes = len(skip_chunks) * VPS_CHUNK_SIZE
-            # Correct for the last chunk which may be smaller
             if total_chunks - 1 in skip_chunks:
                 last_chunk_size = file_size - (total_chunks - 1) * VPS_CHUNK_SIZE
                 resume_bytes = resume_bytes - VPS_CHUNK_SIZE + last_chunk_size
@@ -508,12 +653,12 @@ class VPSRelaySender:
             )
 
         # ── 6. Send file chunks ───────────────────────────────────
-        chunks_to_send = total_chunks - len(skip_chunks)
         size_str = (
             f"{file_size / (1024**3):.1f} ГБ"
             if file_size >= 1024**3
             else f"{file_size / (1024**2):.1f} МБ"
         )
+        chunks_to_send = total_chunks - len(skip_chunks)
         if skip_chunks:
             self._log(
                 f"📦 Надсилаю: {file_name} ({size_str}) — "
@@ -523,10 +668,9 @@ class VPSRelaySender:
             self._log(f"📦 Надсилаю: {file_name} ({size_str})")
 
         t0 = time.monotonic()
-        sent_bytes = resume_bytes   # start counting from resumed point
+        sent_bytes = resume_bytes
         last_prog  = t0
 
-        # Report initial progress (especially visible for resume)
         if self.on_progress and resume_bytes > 0:
             self.on_progress(sent_bytes, file_size, 0)
 
@@ -534,9 +678,10 @@ class VPSRelaySender:
             for seq in range(total_chunks):
                 if self._cancelled:
                     return False
+                if self._connection_lost.is_set():
+                    return None  # connection lost → retry
 
                 if seq in skip_chunks:
-                    # Skip already-received chunk — advance file position
                     f.seek((seq + 1) * VPS_CHUNK_SIZE)
                     continue
 
@@ -562,21 +707,24 @@ class VPSRelaySender:
         # ── 7. Send DONE and wait for verification ────────────────
         done_payload = json.dumps({
             "type":         "relay_done",
-            "sha256":       file_hash,
+            "sha256":       self._file_hash,
             "total_chunks": total_chunks,
         }).encode()
         self._send_ctl(done_payload)
         self._log("⏳ Чекаю підтвердження цілісності...")
 
-        # Retransmit / done-ack loop
         retransmit_rounds = 0
-        deadline = time.monotonic() + 600   # 10 min max
+        deadline = time.monotonic() + 600
 
         while time.monotonic() < deadline and not self._cancelled:
+            if self._connection_lost.is_set():
+                return None  # connection lost → retry
+
             try:
                 msg = self._ctl_queue.get(timeout=10)
             except queue.Empty:
-                # Re-send DONE in case the receiver missed it
+                if self._connection_lost.is_set():
+                    return None
                 self._send_ctl(done_payload)
                 continue
 
@@ -601,6 +749,8 @@ class VPSRelaySender:
                     for seq_i in missing:
                         if self._cancelled:
                             return False
+                        if self._connection_lost.is_set():
+                            return None
                         f.seek(seq_i * VPS_CHUNK_SIZE)
                         chunk = f.read(VPS_CHUNK_SIZE)
                         if chunk:
@@ -608,7 +758,7 @@ class VPSRelaySender:
                 self._send_ctl(done_payload)
 
         self._log("❌ Таймаут очікування підтвердження")
-        return False
+        return None  # retryable (might be connection issue)
 
     # ── Send helpers ───────────────────────────────────────────────
 
@@ -617,6 +767,7 @@ class VPSRelaySender:
             self._ws.send_binary(bytes([_CTL]) + self._crypto.encrypt(plaintext))
         except Exception as exc:
             log.debug("VPS send ctl error: %s", exc)
+            self._connection_lost.set()
 
     def _send_dat(self, seq: int, chunk: bytes) -> None:
         try:
@@ -626,6 +777,7 @@ class VPSRelaySender:
             self._ws.send_binary(frame)
         except Exception as exc:
             log.debug("VPS send dat error: %s", exc)
+            self._connection_lost.set()
 
     def _recv_worker(self) -> None:
         """Receive control frames from the receiver (runs in background)."""
@@ -642,6 +794,8 @@ class VPSRelaySender:
                         log.debug("VPS recv ctl decode error: %s", exc)
         except Exception:
             pass
+        finally:
+            self._connection_lost.set()
 
     def _close(self) -> None:
         try:
@@ -665,6 +819,7 @@ class VPSRelayReceiver:
     Receive a file through the VPS relay server.
 
     Handles the entire flow: connect → key exchange → verify → receive.
+    Supports auto-reconnect on connection loss during transfer.
     GUI only needs to provide callbacks for progress, status, and verification.
     """
 
@@ -685,6 +840,9 @@ class VPSRelayReceiver:
         self._ws: Optional[websocket.WebSocket] = None
         self._crypto: Optional[CryptoSession] = None
 
+        self._reconnect_token: Optional[str] = None
+        self._retryable = False  # set to True on connection-level errors
+
     def cancel(self) -> None:
         self._cancelled = True
         try:
@@ -693,56 +851,112 @@ class VPSRelayReceiver:
         except Exception:
             pass
 
-    # ── Public entry point ─────────────────────────────────────────
+    # ── Public entry point (with auto-reconnect) ──────────────────
 
     def receive(self) -> Optional[Path]:
         """
         Connect to VPS, perform key exchange + verification, receive file.
+        Auto-reconnects on connection loss (up to RECONNECT_MAX_RETRIES).
         Returns Path to saved file on success, None on failure/cancel.
         """
         if not _HAS_WS:
             self._log("❌ Потрібен пакет websocket-client")
             return None
-        try:
-            return self._receive_impl()
-        except Exception as exc:
-            self._log(f"❌ Помилка: {exc}")
-            log.exception("VPSRelayReceiver error")
-            return None
-        finally:
-            self._close()
 
-    def _receive_impl(self) -> Optional[Path]:
+        for attempt in range(RECONNECT_MAX_RETRIES + 1):
+            if self._cancelled:
+                return None
+
+            if attempt > 0:
+                delay = min(
+                    RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
+                    RECONNECT_MAX_DELAY,
+                )
+                self._log(
+                    f"🔄 Перепідключення через {delay:.0f}с "
+                    f"(спроба {attempt}/{RECONNECT_MAX_RETRIES})..."
+                )
+                time.sleep(delay)
+                if self._cancelled:
+                    return None
+
+            self._retryable = False
+
+            try:
+                result = self._receive_attempt(is_reconnect=(attempt > 0))
+                if result is not None:
+                    return result  # success (Path)
+                if not self._retryable or self._cancelled:
+                    return None   # permanent failure
+                # retryable → continue loop
+                self._log("⚠️ З'єднання втрачено")
+            except Exception as exc:
+                self._log(f"❌ Помилка: {exc}")
+                log.exception("VPSRelayReceiver error")
+            finally:
+                self._close()
+
+        self._log("❌ Вичерпано спроби перепідключення")
+        return None
+
+    def _receive_attempt(self, is_reconnect: bool = False) -> Optional[Path]:
+        """Single receive attempt.
+
+        Returns Path on success, None on failure.
+        Sets self._retryable = True if the failure is connection-related.
+        """
         # ── 1. Connect to VPS ─────────────────────────────────────
-        self._log("🌐 Підключаюсь до relay сервера...")
+        if is_reconnect:
+            self._log("🌐 Перепідключаюсь до relay сервера...")
+        else:
+            self._log("🌐 Підключаюсь до relay сервера...")
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(VPS_RELAY_URL, timeout=30)
-            self._ws.settimeout(300)       # 5 min to wait for peer
-            self._ws.send(self._code)      # register session code
+            self._ws.settimeout(300)
+            self._ws.send(self._code)
         except Exception as exc:
             self._log(f"❌ Помилка підключення до relay: {exc}")
+            self._retryable = is_reconnect
             return None
 
         self._log("⏳ Чекаю відправника...")
 
         # ── 2. Key exchange ───────────────────────────────────────
-        self._crypto = _do_key_exchange(self._ws, self._code, self.on_status)
+        self._crypto, peer_token = _do_key_exchange(
+            self._ws, self._code, self.on_status,
+            reconnect_token=self._reconnect_token,
+        )
         if not self._crypto:
+            self._retryable = is_reconnect
             return None
+
+        new_token = _make_reconnect_token(
+            self._crypto._shared_key, self._code
+        )
 
         # ── 3. Verification ───────────────────────────────────────
         sig_key = derive_signaling_key(self._code)
-        self._ws.settimeout(120)           # tighten timeout for verification
+        self._ws.settimeout(120)
+
+        auto_verify = (
+            is_reconnect
+            and self._reconnect_token is not None
+            and peer_token == self._reconnect_token
+        )
 
         if not _do_verification(
-            self._ws, self._crypto, sig_key, self.on_verify, self.on_status
+            self._ws, self._crypto, sig_key,
+            self.on_verify, self.on_status,
+            auto_verify=auto_verify,
         ):
-            return None
+            return None  # permanent failure (verification rejected)
+
+        self._reconnect_token = new_token
 
         # ── 4. Receive file ───────────────────────────────────────
         self._log("⏳ Чекаю метадані від відправника...")
-        self._ws.settimeout(120)           # transfer timeout
+        self._ws.settimeout(120)
 
         file_name:      Optional[str]  = None
         file_size:      int            = 0
@@ -768,7 +982,7 @@ class VPSRelayReceiver:
             writes = 0
             while True:
                 item = write_queue.get()
-                if item is None:                      # sentinel
+                if item is None:
                     if out_file and not out_file.closed:
                         try:
                             out_file.flush()
@@ -789,10 +1003,12 @@ class VPSRelayReceiver:
 
         try:
             while not self._cancelled:
-                # Receive next frame
                 try:
                     raw = self._ws.recv()
                 except Exception:
+                    # Connection lost during transfer → retryable
+                    if file_name and received_seqs and not self._cancelled:
+                        self._retryable = True
                     break
 
                 if not raw or not isinstance(raw, bytes):
@@ -833,11 +1049,9 @@ class VPSRelayReceiver:
                             and manifest.get("chunk_size") == chunk_size
                             and manifest.get("total_chunks") == total_chunks
                         ):
-                            # Resume: reuse existing .part file
                             is_resume = True
                             received_seqs = manifest["received_chunks"]
                             bytes_received = len(received_seqs) * chunk_size
-                            # Correct for last chunk size
                             if total_chunks - 1 in received_seqs:
                                 last_sz = file_size - (total_chunks - 1) * chunk_size
                                 bytes_received = bytes_received - chunk_size + last_sz
@@ -847,7 +1061,6 @@ class VPSRelayReceiver:
                                 out_file = open(temp_path, "r+b")
                             except Exception as exc:
                                 self._log(f"❌ Не вдалось відкрити .part: {exc}")
-                                # Fall back to fresh transfer
                                 is_resume = False
                                 received_seqs = set()
                                 bytes_received = 0
@@ -860,12 +1073,10 @@ class VPSRelayReceiver:
                                 )
 
                         if not is_resume:
-                            # Fresh transfer
                             received_seqs = set()
                             bytes_received = 0
                             try:
                                 out_file = open(temp_path, "w+b")
-                                # Pre-allocate to avoid fragmentation
                                 if file_size > 0:
                                     out_file.seek(file_size - 1)
                                     out_file.write(b"\x00")
@@ -894,7 +1105,6 @@ class VPSRelayReceiver:
                         else:
                             self._log(f"📥 Отримую: {file_name} ({size_str})")
 
-                        # Send meta ACK (with resume info if applicable)
                         ack_msg: dict = {"type": "relay_meta_ack"}
                         if is_resume and received_seqs:
                             ack_msg["resume"] = True
@@ -904,7 +1114,6 @@ class VPSRelayReceiver:
                         t0 = time.monotonic()
                         last_prog = t0
 
-                        # Show initial progress for resume
                         if self.on_progress and is_resume:
                             self.on_progress(bytes_received, file_size, 0)
 
@@ -915,7 +1124,6 @@ class VPSRelayReceiver:
                         missing = sorted(set(range(total_chunks)) - received_seqs)
 
                         if missing:
-                            # Save manifest before retransmit request
                             if file_name and transfer_id:
                                 _save_manifest(
                                     _manifest_path(self._save_dir, file_name),
@@ -923,7 +1131,6 @@ class VPSRelayReceiver:
                                     file_hash, chunk_size, total_chunks,
                                     received_seqs,
                                 )
-                            # Request retransmit in batches
                             BATCH = 1000
                             for i in range(0, len(missing), BATCH):
                                 batch = missing[i: i + BATCH]
@@ -936,7 +1143,6 @@ class VPSRelayReceiver:
                             )
 
                         else:
-                            # All chunks present → flush writer → verify
                             write_queue.put(None)
                             write_queue.join()
                             if writer_thread:
@@ -954,10 +1160,9 @@ class VPSRelayReceiver:
                                 "type":     "relay_done_ack",
                                 "verified": verified,
                             }).encode())
-                            time.sleep(1)  # let ACK reach sender before closing
+                            time.sleep(1)
 
                             if verified:
-                                # Success → clean up resume manifest
                                 _delete_manifest(self._save_dir, file_name)
                                 if save_path.exists():
                                     save_path.unlink()
@@ -991,14 +1196,12 @@ class VPSRelayReceiver:
                             try:
                                 write_queue.put_nowait((seq, chunk))
                             except queue.Full:
-                                # Discard; retransmit will cover this slot
                                 received_seqs.discard(seq)
                                 bytes_received -= len(chunk)
                                 chunks_since_save -= 1
                         except Exception:
-                            pass  # corrupted → retransmit will cover it
+                            pass
 
-                    # Periodically save resume manifest
                     if (
                         chunks_since_save >= RESUME_SAVE_INTERVAL
                         and file_name and transfer_id
@@ -1023,8 +1226,9 @@ class VPSRelayReceiver:
         except Exception as exc:
             self._log(f"❌ Помилка: {exc}")
             log.exception("VPSRelayReceiver error")
+            if file_name and received_seqs:
+                self._retryable = True
         finally:
-            # Ensure writer thread is stopped
             try:
                 write_queue.put(None)
             except Exception:
@@ -1037,7 +1241,7 @@ class VPSRelayReceiver:
                 except Exception:
                     pass
 
-            # Save resume manifest on interruption (if we have partial data)
+            # Save resume manifest on interruption
             if (
                 file_name and transfer_id and received_seqs
                 and len(received_seqs) < total_chunks
@@ -1053,7 +1257,6 @@ class VPSRelayReceiver:
                     received_seqs,
                 )
 
-        # Arrived here on error or cancel — keep .part + .resume for later
         return None
 
     # ── Send helper ────────────────────────────────────────────────
