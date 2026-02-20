@@ -22,6 +22,11 @@ RESUME_MANIFEST_EXT  = ".resume"          # manifest file extension
 RESUME_MAX_AGE       = 7 * 24 * 3600      # 7 days — auto-cleanup
 RESUME_SAVE_INTERVAL = 64                 # save manifest every N chunks
 
+# ── Auto-reconnect ────────────────────────────────────────────────
+RECONNECT_MAX_RETRIES = 3                 # max reconnect attempts
+RECONNECT_BASE_DELAY  = 3                 # seconds (exponential backoff)
+RECONNECT_MAX_DELAY   = 30                # seconds cap
+
 # ── App ────────────────────────────────────────────────────────────
 APP_NAME = "SecureShare"
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
