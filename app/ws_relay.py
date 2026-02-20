@@ -72,6 +72,7 @@ except ImportError:
 from .config import (
     VPS_RELAY_URL,
     VPS_CHUNK_SIZE,
+    VPS_MAX_FILE_SIZE,
     APP_VERSION,
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -590,10 +591,12 @@ class VPSRelaySender:
         self._ws.settimeout(120)
 
         # Auto-verify on reconnect if peer sent a matching token
+        # (timing-safe comparison to prevent side-channel leaks)
         auto_verify = (
             is_reconnect
             and self._reconnect_token is not None
-            and peer_token == self._reconnect_token
+            and peer_token is not None
+            and hmac.compare_digest(peer_token, self._reconnect_token)
         )
 
         if not _do_verification(
@@ -939,10 +942,12 @@ class VPSRelayReceiver:
         sig_key = derive_signaling_key(self._code)
         self._ws.settimeout(120)
 
+        # Timing-safe comparison to prevent side-channel leaks
         auto_verify = (
             is_reconnect
             and self._reconnect_token is not None
-            and peer_token == self._reconnect_token
+            and peer_token is not None
+            and hmac.compare_digest(peer_token, self._reconnect_token)
         )
 
         if not _do_verification(
@@ -1026,12 +1031,53 @@ class VPSRelayReceiver:
                     t = msg.get("type")
 
                     if t == "relay_meta":
-                        file_name    = msg["name"]
+                        raw_name     = msg["name"]
                         file_size    = msg["size"]
                         file_hash    = msg["sha256"]
                         chunk_size   = msg.get("chunk_size", VPS_CHUNK_SIZE)
                         total_chunks = msg.get("total_chunks", 0)
                         transfer_id  = msg.get("transfer_id", "")
+
+                        # ── Security: sanitize file name (path traversal) ─
+                        file_name = Path(raw_name).name  # strip dirs
+                        if (
+                            not file_name
+                            or file_name in (".", "..")
+                            or "\x00" in file_name
+                        ):
+                            self._log("❌ Небезпечне ім'я файлу від відправника")
+                            return None
+                        # Defense-in-depth: verify resolved path stays in save_dir
+                        _resolved = (self._save_dir / file_name).resolve()
+                        if not str(_resolved).startswith(
+                            str(self._save_dir.resolve())
+                        ):
+                            self._log("❌ Небезпечне ім'я файлу (path traversal)")
+                            return None
+
+                        # ── Security: validate file size ──────────────────
+                        if not isinstance(file_size, int) or file_size <= 0:
+                            self._log("❌ Невірний розмір файлу")
+                            return None
+                        if file_size > VPS_MAX_FILE_SIZE:
+                            self._log(
+                                f"❌ Розмір файлу ({file_size / (1024**3):.1f} ГБ) "
+                                f"перевищує ліміт ({VPS_MAX_FILE_SIZE / (1024**3):.0f} ГБ)"
+                            )
+                            return None
+
+                        # ── Security: validate chunk_size / total_chunks ──
+                        if not isinstance(chunk_size, int) or chunk_size <= 0:
+                            chunk_size = VPS_CHUNK_SIZE
+                        if chunk_size > 4 * 1024 * 1024:  # max 4 MB
+                            chunk_size = VPS_CHUNK_SIZE
+                        expected_chunks = (file_size + chunk_size - 1) // chunk_size
+                        if total_chunks != expected_chunks:
+                            log.warning(
+                                "total_chunks mismatch: got %d, expected %d",
+                                total_chunks, expected_chunks,
+                            )
+                            total_chunks = expected_chunks
 
                         save_path = self._save_dir / file_name
                         temp_path = save_path.with_suffix(save_path.suffix + ".part")
