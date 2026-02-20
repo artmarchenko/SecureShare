@@ -54,6 +54,7 @@ import hmac
 import json
 import logging
 import queue
+import socket
 import struct
 import threading
 import time
@@ -68,6 +69,17 @@ try:
     _HAS_WS = True
 except ImportError:
     _HAS_WS = False
+
+
+def _is_dns_error(exc: Exception) -> bool:
+    """Return True if the exception is a DNS resolution failure (transient)."""
+    # socket.gaierror is the canonical DNS error
+    if isinstance(exc, socket.gaierror):
+        return True
+    # websocket-client wraps it; check the string as well
+    msg = str(exc).lower()
+    return "getaddrinfo" in msg or "name or service not known" in msg
+
 
 from .config import (
     VPS_RELAY_URL,
@@ -569,6 +581,9 @@ class VPSRelaySender:
             self._ws.send(self._code)      # register session code
         except Exception as exc:
             self._log(f"❌ Помилка підключення до relay: {exc}")
+            # DNS failures are transient — always allow retry
+            if _is_dns_error(exc):
+                return None
             return None if is_reconnect else False
 
         self._log("⏳ Чекаю отримувача...")
@@ -920,7 +935,8 @@ class VPSRelayReceiver:
             self._ws.send(self._code)
         except Exception as exc:
             self._log(f"❌ Помилка підключення до relay: {exc}")
-            self._retryable = is_reconnect
+            # DNS failures are transient — always allow retry
+            self._retryable = is_reconnect or _is_dns_error(exc)
             return None
 
         self._log("⏳ Чекаю відправника...")
