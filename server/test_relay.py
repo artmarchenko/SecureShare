@@ -312,7 +312,7 @@ class RelayTester:
         """Sender connects, receiver joins 3s later — should still pair."""
         code = random_code()
         msg = b"Delayed peer test data"
-        data, errors = _run_pair(self.url, code, msg, send_delay=5, recv_delay=3)
+        data, errors = _run_pair(self.url, code, msg, send_delay=8, recv_delay=3)
 
         if errors:
             return TestResult("delayed_peer", False, error="; ".join(errors))
