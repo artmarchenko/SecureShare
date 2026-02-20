@@ -235,6 +235,15 @@ jobs:
             server/Caddyfile \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/home/${{ secrets.VPS_USER }}/secureshare-relay/
 
+      - name: Copy landing page to VPS
+        run: |
+          VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay/www"
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} "mkdir -p ${DEST}"
+          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no -r \
+            server/www/* \
+            ${VPS}:${DEST}/
+
       - name: Upload app to VPS for /download endpoint
         run: |
           TAG="${{ github.ref_name }}"
@@ -266,18 +275,29 @@ jobs:
           echo "Waiting for server to be ready..."
           sleep 20
 
-          # Check WebSocket endpoint (retry up to 3 times)
+          # Check landing page (retry up to 3 times)
           for i in 1 2 3; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               --max-time 15 \
-              https://secureshare-relay.duckdns.org 2>/dev/null || echo "000")
-            echo "Attempt $i — WebSocket endpoint: HTTP $STATUS"
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "101" ] || [ "$STATUS" = "426" ]; then
-              echo "✅ Server is UP"
+              https://secureshare-relay.duckdns.org/ 2>/dev/null || echo "000")
+            echo "Attempt $i — Landing page: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Landing page is UP"
               break
             fi
             sleep 5
           done
+
+          # Check health endpoint
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            https://secureshare-relay.duckdns.org/health 2>/dev/null || echo "000")
+          echo "Health endpoint: HTTP $HEALTH"
+          if [ "$HEALTH" = "200" ]; then
+            echo "✅ Health endpoint OK"
+          else
+            echo "⚠️ Health returned: $HEALTH"
+          fi
 
           # Check download endpoint (HEAD to avoid downloading full file)
           DL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
