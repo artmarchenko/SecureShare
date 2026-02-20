@@ -6,8 +6,9 @@
 #  1. Lint + import check (ubuntu, fast)
 #  2. Server tests against live VPS (ubuntu)
 #  3. Build .exe (windows-latest, PyInstaller)
-#  4. Create GitHub Release with .exe attached
-#  5. Deploy server to VPS (scp + docker compose)
+#  4. Build Linux binary (ubuntu-latest, PyInstaller)
+#  5. Create GitHub Release with Windows + Linux assets
+#  6. Deploy server to VPS (scp + docker compose)
 # ──────────────────────────────────────────────────────────────
 
 name: Release
@@ -137,21 +138,90 @@ jobs:
             dist/SecureShare.zip
           retention-days: 30
 
-  # ── Job 4: Create Release ───────────────────────────────────
+  # ── Job 4: Build Linux binary ────────────────────────────────
+  build-linux:
+    name: Build Linux Binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-linux-${{ hashFiles('requirements.txt') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: python build.py
+
+      - name: Verify binary
+        run: |
+          BIN="dist/SecureShare"
+          if [ -f "$BIN" ]; then
+            SIZE=$(du -h "$BIN" | cut -f1)
+            echo "SecureShare: $SIZE"
+            file "$BIN"
+            chmod +x "$BIN"
+          else
+            echo "Binary not found!"
+            exit 1
+          fi
+
+      - name: Package with version
+        run: |
+          TAG="${{ github.ref_name }}"
+          chmod +x dist/SecureShare
+          # Versioned tar.gz
+          tar -czf "dist/SecureShare-${TAG}-linux-x64.tar.gz" -C dist SecureShare
+          # Latest tar.gz
+          cp "dist/SecureShare-${TAG}-linux-x64.tar.gz" "dist/SecureShare-linux-x64.tar.gz"
+          echo "Created: SecureShare-${TAG}-linux-x64.tar.gz"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureShare-build-linux
+          path: |
+            dist/SecureShare-*-linux-x64.tar.gz
+            dist/SecureShare-linux-x64.tar.gz
+          retention-days: 30
+
+  # ── Job 5: Create Release ───────────────────────────────────
   release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [build, server-tests]
+    needs: [build, build-linux, server-tests]
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history for changelog
 
-      - name: Download build artifact
+      - name: Download Windows build
         uses: actions/download-artifact@v4
         with:
           name: SecureShare-build
+          path: dist/
+
+      - name: Download Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: SecureShare-build-linux
           path: dist/
 
       - name: Generate release notes
@@ -174,10 +244,13 @@ jobs:
             echo "$CHANGES" | sed 's/^/- /'
             echo ""
             echo "### Download"
-            echo "Download \`SecureShare-$TAG.zip\`, extract and run — no installation needed."
+            echo "| OS | File | Instructions |"
+            echo "|---|---|---|"
+            echo "| Windows | \`SecureShare-$TAG.zip\` | Extract and run — no installation needed |"
+            echo "| Linux | \`SecureShare-$TAG-linux-x64.tar.gz\` | \`tar xzf SecureShare-*.tar.gz && chmod +x SecureShare && ./SecureShare\` |"
             echo ""
             echo "### Requirements"
-            echo "- Windows 10/11 (64-bit)"
+            echo "- Windows 10/11 or Linux (64-bit)"
             echo "- Internet connection"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -193,6 +266,7 @@ jobs:
           files: |
             dist/SecureShare-${{ github.ref_name }}.zip
             dist/SecureShare-${{ github.ref_name }}.exe
+            dist/SecureShare-${{ github.ref_name }}-linux-x64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -200,7 +274,7 @@ jobs:
         run: |
           echo "## Release Created" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Assets:** SecureShare-${{ github.ref_name }}.zip + .exe" >> $GITHUB_STEP_SUMMARY
+          echo "**Assets:** SecureShare-${{ github.ref_name }}.zip + .exe + linux-x64.tar.gz" >> $GITHUB_STEP_SUMMARY
 
   # ── Job 5: Deploy Server to VPS ─────────────────────────────
   deploy:
@@ -219,10 +293,16 @@ jobs:
           chmod 600 ~/.ssh/vps_key
           ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Download build artifact
+      - name: Download Windows build
         uses: actions/download-artifact@v4
         with:
           name: SecureShare-build
+          path: dist/
+
+      - name: Download Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: SecureShare-build-linux
           path: dist/
 
       - name: Copy server files to VPS
@@ -259,7 +339,16 @@ jobs:
           ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} \
             "cp ${DEST}/SecureShare-${TAG}.zip ${DEST}/SecureShare.zip"
 
-          echo "Uploaded: SecureShare-${TAG}.zip + SecureShare.zip (latest)"
+          # Copy versioned Linux tar.gz
+          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            dist/SecureShare-${TAG}-linux-x64.tar.gz \
+            ${VPS}:${DEST}/SecureShare-${TAG}-linux-x64.tar.gz
+
+          # Create/overwrite latest Linux
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} \
+            "cp ${DEST}/SecureShare-${TAG}-linux-x64.tar.gz ${DEST}/SecureShare-linux-x64.tar.gz"
+
+          echo "Uploaded: Windows .zip + Linux .tar.gz (versioned + latest)"
 
       - name: Deploy with docker compose
         run: |
