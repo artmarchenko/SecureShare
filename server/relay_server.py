@@ -57,7 +57,7 @@ LISTEN_PORT = int(os.getenv("RELAY_PORT", "8765"))
 HEALTH_PORT = int(os.getenv("RELAY_HEALTH_PORT", "8766"))
 
 # Version info for /api/version (update on each release)
-LATEST_CLIENT_VERSION = os.getenv("RELAY_LATEST_VERSION", "3.3.6")
+LATEST_CLIENT_VERSION = os.getenv("RELAY_LATEST_VERSION", "3.3.7")
 DOWNLOAD_BASE_URL = os.getenv(
     "RELAY_DOWNLOAD_URL",
     "https://secureshare-relay.duckdns.org/download",
