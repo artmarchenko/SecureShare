@@ -2,4 +2,4 @@ customtkinter>=5.2.0
 cryptography>=46.0.5
 certifi>=2024.0.0
 websocket-client>=1.7.0
-pyinstaller>=6.0.0
+pyinstaller==6.19.0
