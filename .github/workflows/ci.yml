@@ -50,7 +50,14 @@ jobs:
       - name: Install deps
         run: |
           pip install -r requirements.txt
-          pip install flake8
+          pip install flake8 pip-audit
+
+      - name: Security audit (pip-audit)
+        run: |
+          echo "## Checking client dependencies..."
+          pip-audit -r requirements.txt
+          echo "## Checking server dependencies..."
+          pip-audit -r server/requirements.txt
 
       - name: Lint app code
         run: flake8 app/ main.py build.py
