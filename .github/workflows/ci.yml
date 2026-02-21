@@ -1,82 +1,75 @@
 # ──────────────────────────────────────────────────────────────
-#  SecureShare CI — Lint + Import Check
+#  SecureShare CI — Lint & Import Check
 #
-#  Runs on every push and pull request.
-#  Uses ubuntu-latest (cheapest runner, 1x billing).
-#  Server tests are NOT included here — they run in release.yml
-#  against the live VPS.
+#  Runs on every push / PR that touches app code.
+#  Fast feedback loop (~1 min) without building or deploying.
 # ──────────────────────────────────────────────────────────────
 
 name: CI
 
 on:
   push:
-    branches: ["*"]
+    branches: [main]
+    paths:
+      - "app/**"
+      - "main.py"
+      - "build.py"
+      - "requirements.txt"
+      - "server/relay_server.py"
+      - "server/analytics.py"
   pull_request:
     branches: [main]
-
-permissions:
-  contents: read
+    paths:
+      - "app/**"
+      - "main.py"
+      - "build.py"
+      - "requirements.txt"
+      - "server/relay_server.py"
+      - "server/analytics.py"
+  workflow_dispatch:  # manual trigger for testing
 
 jobs:
-  lint-and-check:
+  lint:
     name: Lint & Import Check
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
-      # ── Checkout ────────────────────────────────────────────
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ── Python setup ────────────────────────────────────────
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # ── Cache pip ───────────────────────────────────────────
-      - name: Cache pip packages
+      - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-
+          key: pip-ci-${{ hashFiles('requirements.txt') }}
 
-      # ── Install dependencies ────────────────────────────────
-      - name: Install dependencies
+      - name: Install deps
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install flake8
 
-      # ── Lint ────────────────────────────────────────────────
-      - name: Lint with flake8
-        run: |
-          echo "=== Linting client code ==="
-          flake8 app/ main.py build.py
-          echo "=== Linting server code ==="
-          flake8 server/relay_server.py
-          echo "✅ All lint checks passed"
+      - name: Lint app code
+        run: flake8 app/ main.py build.py
 
-      # ── Import Check ────────────────────────────────────────
-      - name: Verify imports
+      - name: Lint server code
+        run: flake8 server/relay_server.py
+
+      - name: Import check
         run: |
           python -c "
-          from app.config import APP_NAME, APP_VERSION, VPS_RELAY_URL, PROTOCOL_VERSION
+          from app.config import APP_NAME, APP_VERSION, PROTOCOL_VERSION
           from app.crypto_utils import CryptoSession
           from app.ws_relay import VPSRelaySender, VPSRelayReceiver
-          print(f'{APP_NAME} v{APP_VERSION} — all imports OK')
-          print(f'Protocol v{PROTOCOL_VERSION}')
-          print(f'Relay: {VPS_RELAY_URL}')
+          from app.updater import check_for_update, can_auto_update
+          from app.telemetry import report_crash, report_session
+          print(f'{APP_NAME} v{APP_VERSION} proto={PROTOCOL_VERSION} — all imports OK')
           "
 
-      # ── Summary ─────────────────────────────────────────────
-      - name: CI Summary
-        if: always()
+      - name: Summary
         run: |
-          echo "## CI Results" >> $GITHUB_STEP_SUMMARY
-          echo "- **Python:** 3.12" >> $GITHUB_STEP_SUMMARY
-          echo "- **Lint:** flake8 (app + server)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Import check:** all modules verified" >> $GITHUB_STEP_SUMMARY
+          echo "## CI Check ✅" >> $GITHUB_STEP_SUMMARY
+          echo "Lint and import check passed." >> $GITHUB_STEP_SUMMARY

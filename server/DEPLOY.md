@@ -193,6 +193,55 @@ docker compose up -d --build
 # Готово за 30 секунд
 ```
 
+## Аналітика і моніторинг (v3.3)
+
+### Налаштування
+
+Створити файл `.env` в папці `server/`:
+
+```bash
+# ОБОВ'ЯЗКОВО: секретний ключ для доступу до адмін-панелі
+RELAY_ADMIN_KEY=<згенеруйте-довгий-випадковий-ключ>
+
+# ОПЦІЙНО: Telegram алерти (тільки критичні серверні події)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+```
+
+Генерація ключа:
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+### Адмін-панель
+
+Доступна за адресою: `https://secureshare-relay.duckdns.org/admin`
+
+- Введіть `RELAY_ADMIN_KEY` при першому вході
+- Дашборд з графіками, статистикою, crash-звітами
+- Скачування JSONL логів для аналізу
+
+### API ендпоінти
+
+| Ендпоінт | Метод | Опис |
+|----------|-------|------|
+| `/health` | GET | Перевірка здоров'я (публічний) |
+| `/api/crash` | POST | Прийом crash-звітів (rate-limited) |
+| `/api/telemetry` | POST | Прийом анонімної телеметрії (rate-limited) |
+| `/api/stats?key=KEY` | GET | Повна статистика (admin) |
+| `/api/crashes?key=KEY` | GET | Згруповані crash-звіти (admin) |
+| `/api/files?key=KEY` | GET | Список лог-файлів (admin) |
+| `/api/logs?key=KEY&file=NAME` | GET | Скачати JSONL файл (admin) |
+
+### Безпека аналітики
+
+- API key порівнюється timing-safe (`hmac.compare_digest`)
+- Rate limit: 5 crash / 10 telemetry на IP/год
+- Lockout після 10 невірних API ключів на IP
+- Всі дані анонімні — без IP, імен файлів, session codes
+- JSONL файли ротуються при досягненні 50 МБ
+- Disk-limited через Docker volume
+
 ## Моніторинг
 
 ```bash

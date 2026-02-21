@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import random
 import secrets
 import socket
 import ssl
@@ -28,17 +29,40 @@ import customtkinter as ctk
 from .config import (
     APP_NAME,
     APP_VERSION,
+    DONATE_URL,
+    GITHUB_URL,
+    HOMEPAGE_URL,
     SESSION_CODE_LENGTH,
     VPS_MAX_FILE_SIZE,
     VPS_RELAY_URL,
 )
 from .ws_relay import VPSRelaySender, VPSRelayReceiver
+from .updater import (
+    check_for_update, skip_version, clear_skipped, ReleaseInfo,
+    can_auto_update, download_and_verify, install_and_restart,
+)
+from .telemetry import (
+    report_crash, report_session,
+    is_telemetry_enabled, set_telemetry_enabled,
+    is_crash_reporting_enabled, set_crash_reporting_enabled,
+)
 
 log = logging.getLogger(__name__)
 
 # ── Appearance ─────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+
+# ── Startup tips (shown randomly on launch) ───────────────────────
+_STARTUP_TIPS = [
+    "❤️  SecureShare — безкоштовний open-source проєкт. Підтримайте розробку: {donate_url}",
+    "🔒  Ваші файли захищені AES-256-GCM шифруванням. Сервер ніколи не бачить ваших даних.",
+    "🔄  При втраті з’єднання передача автоматично відновиться з місця зупинки.",
+    "⭐  Подобається SecureShare? Поставте зірку на GitHub: {github_url}",
+    "🚀  Порада: для кількох файлів спакуйте їх в один архів (ZIP/RAR).",
+    "🛡️  Завжди перевіряйте код верифікації — це захист від атак посередника (MITM).",
+    "☕  Розробка та сервер коштують гроші. Пригостіть автору каву: {donate_url}",
+]
 
 
 def _generate_code() -> str:
@@ -123,6 +147,12 @@ class App(ctk.CTk):
 
         self._build_ui()
 
+        # ── Auto-check for updates (silent, background) ─────────
+        self.after(2000, self._check_updates_startup)
+
+        # ── Show a random startup tip ────────────────────────
+        self.after(500, self._show_startup_tip)
+
     # ── Window icon ──────────────────────────────────────────────
 
     def _set_window_icon(self):
@@ -167,10 +197,10 @@ class App(ctk.CTk):
         # Help button (top-right)
         ctk.CTkButton(
             title_frame,
-            text="❓ Довідка",
-            width=96,
+            text="❓",
+            width=36,
             height=30,
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(size=14),
             fg_color="#3a3a3a",
             hover_color="#4a4a4a",
             border_width=1,
@@ -182,17 +212,47 @@ class App(ctk.CTk):
         # Diagnostics button
         ctk.CTkButton(
             title_frame,
-            text="🔍 Діагностика",
-            width=120,
+            text="🔍",
+            width=36,
             height=30,
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(size=14),
             fg_color="#2c3e50",
             hover_color="#34495e",
             border_width=1,
             border_color="#555555",
             corner_radius=8,
             command=self._run_diagnostics,
-        ).pack(side="right", padx=(0, 6))
+        ).pack(side="right", padx=(0, 4))
+
+        # Donate button
+        ctk.CTkButton(
+            title_frame,
+            text="❤️",
+            width=36,
+            height=30,
+            font=ctk.CTkFont(size=14),
+            fg_color="#8e2a4a",
+            hover_color="#a83262",
+            border_width=1,
+            border_color="#b44d6d",
+            corner_radius=8,
+            command=self._open_donate,
+        ).pack(side="right", padx=(0, 4))
+
+        # Check for updates button
+        ctk.CTkButton(
+            title_frame,
+            text="🔄",
+            width=36,
+            height=30,
+            font=ctk.CTkFont(size=14),
+            fg_color="#2c3e50",
+            hover_color="#34495e",
+            border_width=1,
+            border_color="#555555",
+            corner_radius=8,
+            command=self._check_updates_manual,
+        ).pack(side="right", padx=(0, 4))
 
         # Tab view
         self.tabs = ctk.CTkTabview(self, width=self.WIDTH - 40)
@@ -954,6 +1014,307 @@ class App(ctk.CTk):
             command=_on_close,
         ).pack(pady=(6, 12))
 
+    # ── Update checker ────────────────────────────────────────────
+
+    def _show_startup_tip(self):
+        """Show a random helpful tip in the status log on app launch."""
+        tip = random.choice(_STARTUP_TIPS).format(
+            donate_url=DONATE_URL, github_url=GITHUB_URL,
+        )
+        self._log(tip)
+
+    def _open_donate(self):
+        """Open the donation page in the default browser."""
+        webbrowser.open(DONATE_URL)
+        self._log("❤️  Дякую за підтримку!")
+
+    def _check_updates_startup(self):
+        """Run a silent background update check on startup (respects cooldown)."""
+        def _worker():
+            try:
+                release = check_for_update(force=False)
+                if release:
+                    self.after(0, lambda: self._show_update_dialog(release))
+            except Exception as exc:
+                log.debug("Startup update check failed: %s", exc)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _check_updates_manual(self):
+        """Manual update check triggered by the user."""
+        clear_skipped()
+
+        # Create a small "checking" indicator
+        self._log("🔍 Перевіряю оновлення...")
+
+        def _worker():
+            try:
+                release = check_for_update(force=True)
+                if release:
+                    self.after(0, lambda: self._show_update_dialog(release))
+                else:
+                    self.after(0, lambda: self._log(
+                        f"✅ У вас актуальна версія (v{APP_VERSION})"
+                    ))
+            except Exception as exc:
+                self.after(0, lambda: self._log(
+                    f"⚠️ Не вдалось перевірити оновлення: {exc}"
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_update_dialog(self, release: ReleaseInfo):
+        """Show a modal dialog informing the user about a new version."""
+        if hasattr(self, "_update_win") and self._update_win is not None:
+            try:
+                self._update_win.focus()
+                return
+            except Exception:
+                pass
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"{APP_NAME} — Оновлення")
+        win.geometry("520x480")
+        win.resizable(True, True)
+        win.transient(self)
+        win.grab_set()
+        win.focus_force()
+        self._update_win = win
+
+        def _on_close():
+            self._update_win = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # Center over parent
+        win.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() - 520) // 2
+        y = self.winfo_y() + (self.winfo_height() - 480) // 2
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+        # ── Header ────────────────────────────────────────────────
+        header = ctk.CTkFrame(win, fg_color="#1a5276", corner_radius=0)
+        header.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="🆕  Доступне оновлення!",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="white",
+        ).pack(padx=20, pady=14)
+
+        # ── Version info ──────────────────────────────────────────
+        info_frame = ctk.CTkFrame(win, fg_color="#2a2a2a", corner_radius=8)
+        info_frame.pack(fill="x", padx=20, pady=(12, 6))
+
+        ver_row = ctk.CTkFrame(info_frame, fg_color="transparent")
+        ver_row.pack(fill="x", padx=16, pady=(12, 4))
+
+        ctk.CTkLabel(
+            ver_row,
+            text=f"Поточна:  v{APP_VERSION}",
+            font=ctk.CTkFont(size=13),
+            text_color="#aaaaaa",
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            ver_row,
+            text="  →  ",
+            font=ctk.CTkFont(size=13),
+            text_color="#888888",
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            ver_row,
+            text=f"Нова:  v{release.version}",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#2ecc71",
+        ).pack(side="left")
+
+        if release.published:
+            pub_date = release.published[:10]  # YYYY-MM-DD
+            ctk.CTkLabel(
+                info_frame,
+                text=f"Дата випуску: {pub_date}",
+                font=ctk.CTkFont(size=11),
+                text_color="#888888",
+            ).pack(padx=16, pady=(0, 10))
+
+        # ── Release notes ─────────────────────────────────────────
+        ctk.CTkLabel(
+            win,
+            text="Що нового:",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w",
+        ).pack(fill="x", padx=24, pady=(8, 2))
+
+        notes_box = ctk.CTkTextbox(
+            win,
+            height=160,
+            font=ctk.CTkFont(size=12),
+            wrap="word",
+            fg_color="#1e1e1e",
+        )
+        notes_box.pack(fill="both", expand=True, padx=20, pady=(2, 8))
+
+        # Format release notes — strip markdown headers for readability
+        body = release.body.strip() if release.body else "Немає опису."
+        notes_box.insert("1.0", body)
+        notes_box.configure(state="disabled")
+
+        # ── Download progress (hidden by default) ──────────────────
+        progress_frame = ctk.CTkFrame(win, fg_color="transparent")
+        progress_frame.pack(fill="x", padx=20, pady=(0, 4))
+
+        update_progress_bar = ctk.CTkProgressBar(
+            progress_frame, height=12,
+        )
+        update_progress_bar.set(0)
+        # Hidden initially
+
+        update_status_label = ctk.CTkLabel(
+            progress_frame,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color="#aaaaaa",
+        )
+        # Hidden initially
+
+        # ── Action buttons ────────────────────────────────────────
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=(4, 16))
+
+        # Auto-install button (only for frozen .exe builds)
+        auto_update_btn = None
+        if can_auto_update():
+            def _auto_update():
+                """Download, verify, and install the update automatically."""
+                # Disable all buttons
+                if auto_update_btn:
+                    auto_update_btn.configure(state="disabled", text="⏳ Оновлюю...")
+                for child in btn_frame.winfo_children():
+                    try:
+                        child.configure(state="disabled")
+                    except Exception:
+                        pass
+
+                # Show progress bar
+                update_progress_bar.pack(fill="x", padx=4, pady=(4, 2))
+                update_status_label.pack(padx=4, pady=(0, 4))
+
+                def _progress(downloaded: int, total: int):
+                    frac = downloaded / total if total > 0 else 0
+                    pct = frac * 100
+                    mb_done = downloaded / (1024 * 1024)
+                    mb_total = total / (1024 * 1024)
+                    win.after(0, lambda: update_progress_bar.set(frac))
+                    win.after(0, lambda: update_status_label.configure(
+                        text=f"{pct:.0f}%  ·  {mb_done:.1f} / {mb_total:.1f} МБ"
+                    ))
+
+                def _status(msg: str):
+                    win.after(0, lambda: update_status_label.configure(text=msg))
+
+                def _worker():
+                    try:
+                        binary, err = download_and_verify(
+                            release,
+                            progress_cb=_progress,
+                            status_cb=_status,
+                        )
+                        if binary is None:
+                            win.after(0, lambda: update_status_label.configure(
+                                text=f"❌ {err}", text_color="#e74c3c",
+                            ))
+                            win.after(0, lambda: _enable_buttons())
+                            return
+
+                        _status("Встановлюю оновлення...")
+                        ok, err = install_and_restart(
+                            binary, status_cb=_status,
+                        )
+                        if not ok:
+                            win.after(0, lambda: update_status_label.configure(
+                                text=f"❌ {err}", text_color="#e74c3c",
+                            ))
+                            win.after(0, lambda: _enable_buttons())
+                    except SystemExit:
+                        raise
+                    except Exception as exc:
+                        win.after(0, lambda: update_status_label.configure(
+                            text=f"❌ Помилка: {exc}", text_color="#e74c3c",
+                        ))
+                        win.after(0, lambda: _enable_buttons())
+
+                def _enable_buttons():
+                    if auto_update_btn:
+                        auto_update_btn.configure(
+                            state="normal", text="🔄 Оновити зараз"
+                        )
+                    for child in btn_frame.winfo_children():
+                        try:
+                            child.configure(state="normal")
+                        except Exception:
+                            pass
+
+                threading.Thread(target=_worker, daemon=True).start()
+
+            auto_update_btn = ctk.CTkButton(
+                btn_frame,
+                text="🔄 Оновити зараз",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                fg_color="#2471a3",
+                hover_color="#2e86c1",
+                height=36,
+                command=_auto_update,
+            )
+            auto_update_btn.pack(side="left", padx=(0, 6), fill="x", expand=True)
+
+        def _download():
+            """Open the release page in the default browser."""
+            import webbrowser
+            webbrowser.open(release.html_url)
+            _on_close()
+
+        ctk.CTkButton(
+            btn_frame,
+            text="🌐 GitHub",
+            font=ctk.CTkFont(size=12),
+            fg_color="#27ae60",
+            hover_color="#2ecc71",
+            height=36,
+            width=90,
+            command=_download,
+        ).pack(side="left", padx=(0, 6))
+
+        def _skip():
+            """Skip this specific version."""
+            skip_version(release.version)
+            self._log(f"⏩ Версію v{release.version} пропущено")
+            _on_close()
+
+        ctk.CTkButton(
+            btn_frame,
+            text="⏩ Пропустити",
+            font=ctk.CTkFont(size=12),
+            fg_color="#555555",
+            hover_color="#666666",
+            height=36,
+            width=110,
+            command=_skip,
+        ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Пізніше",
+            font=ctk.CTkFont(size=12),
+            fg_color="#3a3a3a",
+            hover_color="#4a4a4a",
+            height=36,
+            width=80,
+            command=_on_close,
+        ).pack(side="right")
+
     def _set_state(self, state: str):
         """Update the connection status indicator."""
         label_text, color = self._STATE_LABELS.get(
@@ -1182,6 +1543,10 @@ class App(ctk.CTk):
 
     def _send_worker(self, filepath: str, code: str):
         """Send a file through the VPS relay server."""
+        t_start = time.monotonic()
+        file_size = Path(filepath).stat().st_size
+        outcome = "error"
+        error_type = ""
         try:
             sender = VPSRelaySender(
                 session_code=code,
@@ -1195,22 +1560,40 @@ class App(ctk.CTk):
             ok = sender.send()
 
             if ok:
+                outcome = "success"
                 self._set_state(self.STATE_DONE)
                 self._log("🎉 Передачу завершено успішно!")
+                self._log(
+                    "☕ Подобається SecureShare? "
+                    "Пригостіть автору каву — " + DONATE_URL
+                )
             elif self._cancel_flag:
+                outcome = "cancelled"
                 self._set_state(self.STATE_IDLE)
                 self._log("⏹ Передачу скасовано")
             else:
+                outcome = "error"
                 self._set_state(self.STATE_ERROR)
                 self._log("❌ Помилка передачі")
 
         except Exception as exc:
+            outcome = "error"
+            error_type = type(exc).__name__
             self._set_state(self.STATE_ERROR)
             self._log(f"❌ Помилка: {exc}")
             log.exception("Send worker error")
+            report_crash(exc, state="send_worker")
         finally:
             self._current_transfer = None
             self._set_buttons(True)
+            # Anonymous session telemetry
+            report_session(
+                role="sender",
+                outcome=outcome,
+                file_size=file_size,
+                duration_s=time.monotonic() - t_start,
+                error_type=error_type,
+            )
 
     # ════════════════════════════════════════════════════════════════
     #  RECEIVE workflow
@@ -1245,6 +1628,10 @@ class App(ctk.CTk):
 
     def _recv_worker(self, code: str, save_dir: str):
         """Receive a file through the VPS relay server."""
+        t_start = time.monotonic()
+        outcome = "error"
+        error_type = ""
+        file_size = 0
         try:
             receiver = VPSRelayReceiver(
                 session_code=code,
@@ -1258,19 +1645,41 @@ class App(ctk.CTk):
             result = receiver.receive()
 
             if result:
+                outcome = "success"
+                try:
+                    file_size = Path(result).stat().st_size
+                except Exception:
+                    pass
                 self._set_state(self.STATE_DONE)
                 self._log(f"🎉 Файл отримано: {result}")
+                self._log(
+                    "☕ SecureShare — безкоштовний сервіс. "
+                    "Підтримайте розробку: " + DONATE_URL
+                )
             elif self._cancel_flag:
+                outcome = "cancelled"
                 self._set_state(self.STATE_IDLE)
                 self._log("⏹ Отримання скасовано")
             else:
+                outcome = "error"
                 self._set_state(self.STATE_ERROR)
                 self._log("❌ Помилка отримання")
 
         except Exception as exc:
+            outcome = "error"
+            error_type = type(exc).__name__
             self._set_state(self.STATE_ERROR)
             self._log(f"❌ Помилка: {exc}")
             log.exception("Receive worker error")
+            report_crash(exc, state="recv_worker")
         finally:
             self._current_transfer = None
             self._set_buttons(True)
+            # Anonymous session telemetry
+            report_session(
+                role="receiver",
+                outcome=outcome,
+                file_size=file_size,
+                duration_s=time.monotonic() - t_start,
+                error_type=error_type,
+            )
