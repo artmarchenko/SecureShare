@@ -58,7 +58,7 @@ _STARTUP_TIPS = [
     "⭐  Подобається SecureShare? Поставте зірку на GitHub: {github_url}",
     "🚀  Порада: для кількох файлів спакуйте їх в один архів (ZIP/RAR).",
     "🛡️  Завжди перевіряйте код верифікації — це захист від атак посередника (MITM).",
-    "☕  Розробка та сервер коштують гроші. Пригостіть автору каву: {donate_url}",
+    "☕  Розробка та сервер коштують гроші. Пригостіть автора кавою: {donate_url}",
 ]
 
 
@@ -1015,10 +1015,16 @@ class App(ctk.CTk):
 
     def _show_startup_tip(self):
         """Show a random helpful tip in the status log on app launch."""
-        tip = random.choice(_STARTUP_TIPS).format(
-            donate_url=DONATE_URL, github_url=GITHUB_URL,
-        )
-        self._log(tip)
+        tip_raw = random.choice(_STARTUP_TIPS)
+        # If tip contains a URL placeholder, use clickable log
+        if "{donate_url}" in tip_raw:
+            parts = tip_raw.split("{donate_url}")
+            self._log_donate(parts[0].rstrip(), DONATE_URL)
+        elif "{github_url}" in tip_raw:
+            parts = tip_raw.split("{github_url}")
+            self._log_donate(parts[0].rstrip(), GITHUB_URL)
+        else:
+            self._log(tip_raw)
 
     def _open_donate(self):
         """Open the donation page in the default browser."""
@@ -1339,6 +1345,41 @@ class App(ctk.CTk):
             self.status_box.configure(state="disabled")
         self.after(0, _do)
 
+    def _log_donate(self, text: str, url: str):
+        """Log a message with a clickable donation link (thread-safe)."""
+        ts = _timestamp()
+        log.info("[GUI] %s %s", text, url)
+
+        def _do():
+            tb = self.status_box
+            tb.configure(state="normal")
+            tb.insert("end", f"{ts} {text} ")
+
+            # Create unique tag for this link
+            tag = f"link_{id(url)}_{time.time_ns()}"
+            tb.insert("end", url, tag)
+
+            # Style: underline + orange color
+            inner = tb._textbox  # access underlying tk.Text widget
+            inner.tag_configure(tag, foreground="#f59e0b", underline=True)
+            inner.tag_bind(
+                tag, "<Button-1>",
+                lambda e, u=url: webbrowser.open(u),
+            )
+            inner.tag_bind(
+                tag, "<Enter>",
+                lambda e: inner.configure(cursor="hand2"),
+            )
+            inner.tag_bind(
+                tag, "<Leave>",
+                lambda e: inner.configure(cursor=""),
+            )
+
+            tb.insert("end", "\n")
+            tb.see("end")
+            tb.configure(state="disabled")
+        self.after(0, _do)
+
     def _set_progress(self, done: int, total: int, speed: float):
         def _do():
             frac = done / total if total > 0 else 0
@@ -1562,9 +1603,10 @@ class App(ctk.CTk):
                 outcome = "success"
                 self._set_state(self.STATE_DONE)
                 self._log("🎉 Передачу завершено успішно!")
-                self._log(
+                self._log_donate(
                     "☕ Подобається SecureShare? "
-                    "Пригостіть автору каву — " + DONATE_URL
+                    "Пригостіть автора кавою —",
+                    DONATE_URL,
                 )
             elif self._cancel_flag:
                 outcome = "cancelled"
@@ -1651,9 +1693,10 @@ class App(ctk.CTk):
                     pass
                 self._set_state(self.STATE_DONE)
                 self._log(f"🎉 Файл отримано: {result}")
-                self._log(
+                self._log_donate(
                     "☕ SecureShare — безкоштовний сервіс. "
-                    "Підтримайте розробку: " + DONATE_URL
+                    "Підтримайте розробку:",
+                    DONATE_URL,
                 )
             elif self._cancel_flag:
                 outcome = "cancelled"
