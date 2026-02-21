@@ -773,13 +773,17 @@ def _install_windows(
         # Give the bat script a moment to start
         import time as _time
         _time.sleep(0.5)
-        sys.exit(0)
+
+        # os._exit() is required because sys.exit() only raises
+        # SystemExit in the current thread. When called from a
+        # daemon thread (Tkinter update worker), the main GUI
+        # thread would keep running and hold the .exe file lock.
+        # os._exit() terminates the entire process immediately.
+        os._exit(0)
 
         # Never reached
         return True, ""
 
-    except SystemExit:
-        raise  # re-raise sys.exit
     except Exception as exc:
         return False, f"Failed to create updater script: {exc}"
 
