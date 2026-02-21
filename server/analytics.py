@@ -16,7 +16,6 @@ Security:
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import logging
@@ -43,6 +42,7 @@ MAX_JSONL_SIZE = 50 * 1024 * 1024  # 50 MB — rotate after this
 MAX_HOURLY_BUCKETS = 30 * 24     # 30 days of hourly data in memory
 MAX_STRING_LEN = 500             # max length for any string field
 MAX_CRASHES_IN_MEMORY = 1000     # recent crashes kept in RAM
+MAX_DICT_KEYS = 500              # max unique keys in distribution dicts
 
 # Rate limits for POST endpoints (per IP)
 CRASH_RATE_LIMIT = 5             # max crash reports per IP per hour
@@ -80,6 +80,19 @@ def _sanitize_str(value: Any, max_len: int = MAX_STRING_LEN) -> str:
         if ch == "\n" or ch == "\t" or (ord(ch) >= 32 and ord(ch) != 127)
     )
     return value[:max_len].strip()
+
+
+def _safe_incr(d: dict, key: str, limit: int = MAX_DICT_KEYS) -> None:
+    """Increment a counter in a dict, but refuse new keys if limit reached.
+
+    Prevents memory exhaustion from attacker-supplied unique keys.
+    Existing keys are always incremented regardless of limit.
+    """
+    if key in d:
+        d[key] += 1
+    elif len(d) < limit:
+        d[key] = 1
+    # else: silently drop — dict is full, new keys are rejected
 
 
 def _sanitize_int(value: Any, min_val: int = 0,
@@ -304,7 +317,7 @@ class StatsCollector:
         self._hourly[_hour_key()]["timeout"] += 1
 
     def record_session_completed(self, bytes_relayed: int,
-                                  duration_s: float) -> None:
+                                 duration_s: float) -> None:
         self.lifetime["sessions_completed"] += 1
         self.lifetime["bytes_relayed"] += bytes_relayed
         hour = _hour_key()
@@ -329,7 +342,7 @@ class StatsCollector:
 
     def record_error(self, error_type: str) -> None:
         safe = _sanitize_str(error_type, 100)
-        self._error_types[safe] += 1
+        _safe_incr(self._error_types, safe)
         self._hourly[_hour_key()]["errors"] += 1
 
     def update_peak_rooms(self, active_rooms: int) -> None:
@@ -344,22 +357,22 @@ class StatsCollector:
         outcome = _sanitize_str(event.get("outcome", ""), 20)
 
         if version:
-            self._versions[version] += 1
+            _safe_incr(self._versions, version)
         if os_type:
-            self._os_dist[os_type] += 1
+            _safe_incr(self._os_dist, os_type)
         if outcome:
-            self._client_events[outcome] += 1
+            _safe_incr(self._client_events, outcome)
 
         # Record client-reported errors
         if outcome == "error":
             err_type = _sanitize_str(event.get("error_type", "unknown"), 100)
-            self._error_types[f"client:{err_type}"] += 1
+            _safe_incr(self._error_types, f"client:{err_type}")
 
         # Record if resume/reconnect was used
         if event.get("used_resume"):
-            self._client_events["resume_used"] += 1
+            _safe_incr(self._client_events, "resume_used")
         if event.get("used_reconnect"):
-            self._client_events["reconnect_used"] += 1
+            _safe_incr(self._client_events, "reconnect_used")
 
     # ── Queries ────────────────────────────────────────────────
 

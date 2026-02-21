@@ -329,7 +329,10 @@ class HTTPRouter:
     async def _handle_crashes(self, writer, query: dict, ip: str) -> None:
         if not await self._check_admin(writer, query, ip):
             return
-        hours = min(int(query.get("hours", "48")), 720)  # max 30 days
+        try:
+            hours = min(int(query.get("hours", "48")), 720)  # max 30 days
+        except (ValueError, TypeError):
+            hours = 48
         grouped = self._crashes.get_grouped(hours)
         await _send_response(writer, 200, grouped)
 
@@ -364,19 +367,22 @@ class HTTPRouter:
         # Send raw file
         try:
             data = path.read_bytes()
+            # Sanitize filename for Content-Disposition (prevent CRLF injection)
+            safe_name = path.name.replace("\r", "").replace("\n", "")
+            safe_name = safe_name.replace('"', "'")  # escape quotes
             response = (
                 f"HTTP/1.1 200 OK\r\n"
                 f"Content-Type: application/x-ndjson\r\n"
                 f"Content-Length: {len(data)}\r\n"
-                f"Content-Disposition: attachment; filename=\"{path.name}\"\r\n"
+                f"Content-Disposition: attachment; filename=\"{safe_name}\"\r\n"
                 f"Connection: close\r\n"
                 f"\r\n"
             )
             writer.write(response.encode() + data)
             await writer.drain()
-        except Exception as exc:
+        except Exception:
             await _send_response(writer, 500,
-                                 {"error": f"read error: {exc}"})
+                                 {"error": "file read error"})
 
     # ── Auth helper ────────────────────────────────────────────
 
@@ -431,10 +437,25 @@ def _parse_http(raw: str) -> tuple[str, str, dict, dict, str]:
 def _get_ip_from_headers(
     headers: dict[str, str], writer: asyncio.StreamWriter
 ) -> str:
-    """Extract client IP from headers or transport."""
+    """Extract client IP from headers or transport.
+
+    Priority:
+      1. X-Real-IP — set by Caddy to the actual remote address
+      2. X-Forwarded-For — LAST entry (Caddy appends real IP at the end)
+      3. Transport peername — direct connection IP
+    """
+    # Prefer X-Real-IP (set explicitly by Caddy, cannot be spoofed)
+    real_ip = headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+
+    # Fallback: last entry in XFF (Caddy appends, so last = real IP)
     xff = headers.get("x-forwarded-for", "")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]  # Last = added by Caddy = real IP
+
     try:
         peername = writer.get_extra_info("peername")
         if peername:
