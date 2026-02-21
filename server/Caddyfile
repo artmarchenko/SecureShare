@@ -72,7 +72,7 @@ secureshare-relay.duckdns.org {
 
 	# Landing page — static site (everything else)
 	handle {
-		header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'"
+		header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'"
 		root * /www
 		file_server
 	}
