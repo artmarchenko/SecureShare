@@ -11,14 +11,35 @@ secureshare-relay.duckdns.org {
         -Server
     }
 
-    # Health check endpoint (GET only)
-    @health_get {
-        method GET
-        path /health
-    }
-    handle @health_get {
+    # Health check endpoint — proxy to relay
+    handle /health {
         header Content-Security-Policy "default-src 'none'"
-        respond "ok" 200
+        reverse_proxy relay:8766
+    }
+
+    # Public version endpoint — cacheable, no auth needed
+    handle /api/version {
+        header Content-Security-Policy "default-src 'none'"
+        header Cache-Control "public, max-age=300"
+        reverse_proxy relay:8766
+    }
+
+    # API endpoints — proxy to relay (crash reports, telemetry, admin)
+    handle /api/* {
+        header Content-Security-Policy "default-src 'none'"
+        header Cache-Control "no-store"
+        reverse_proxy relay:8766 {
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # Admin dashboard — static page + API calls
+    handle /admin {
+        header Content-Security-Policy "default-src 'self'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:"
+        root * /www
+        rewrite * /admin.html
+        file_server
     }
 
     # App download — static files from /downloads

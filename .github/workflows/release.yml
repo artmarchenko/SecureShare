@@ -8,7 +8,10 @@
 #  3. Build .exe (windows-latest, PyInstaller)
 #  4. Build Linux binary (ubuntu-latest, PyInstaller)
 #  5. Create GitHub Release with Windows + Linux assets
-#  6. Deploy server to VPS (scp + docker compose)
+#  6. Upload binaries to VPS /download (SCP only, NO relay restart)
+#
+#  Note: Server deploy is handled separately by deploy-server.yml.
+#  This workflow ONLY uploads downloadable binaries to the VPS.
 # ──────────────────────────────────────────────────────────────
 
 name: Release
@@ -235,6 +238,21 @@ jobs:
           name: SecureShare-build-linux
           path: dist/
 
+      - name: Generate SHA-256 checksums
+        run: |
+          TAG="${{ github.ref_name }}"
+          cd dist
+          echo "# SecureShare $TAG — SHA-256 Checksums" > SHA256SUMS.txt
+          echo "# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> SHA256SUMS.txt
+          for f in SecureShare-${TAG}.zip SecureShare-${TAG}.exe SecureShare-${TAG}-linux-x64.tar.gz; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" >> SHA256SUMS.txt
+            fi
+          done
+          echo ""
+          echo "=== SHA256SUMS.txt ==="
+          cat SHA256SUMS.txt
+
       - name: Generate release notes
         id: notes
         run: |
@@ -246,6 +264,8 @@ jobs:
           else
             CHANGES=$(git log --oneline "$TAG" -- . ':!.github' | head -20)
           fi
+
+          CHECKSUMS=$(cat dist/SHA256SUMS.txt | grep -v '^#' | sed 's/^/    /')
 
           {
             echo "notes<<EOF"
@@ -260,9 +280,16 @@ jobs:
             echo "| Windows | \`SecureShare-$TAG.zip\` | Extract and run — no installation needed |"
             echo "| Linux | \`SecureShare-$TAG-linux-x64.tar.gz\` | \`tar xzf SecureShare-*.tar.gz && chmod +x SecureShare && ./SecureShare\` |"
             echo ""
+            echo "### SHA-256 Checksums"
+            echo "\`\`\`"
+            echo "$CHECKSUMS"
+            echo "\`\`\`"
+            echo ""
             echo "### Requirements"
             echo "- Windows 10/11 or Linux (64-bit)"
             echo "- Internet connection"
+            echo ""
+            echo "💡 **Auto-update:** SecureShare v3.3+ checks for updates automatically."
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -278,6 +305,7 @@ jobs:
             dist/SecureShare-${{ github.ref_name }}.zip
             dist/SecureShare-${{ github.ref_name }}.exe
             dist/SecureShare-${{ github.ref_name }}-linux-x64.tar.gz
+            dist/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -287,16 +315,19 @@ jobs:
           echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Assets:** SecureShare-${{ github.ref_name }}.zip + .exe + linux-x64.tar.gz" >> $GITHUB_STEP_SUMMARY
 
-  # ── Job 5: Deploy Server to VPS ─────────────────────────────
-  deploy:
-    name: Deploy Server
+  # ── Job 6: Upload binaries to VPS (NO relay restart) ────────
+  upload-binaries:
+    name: Upload Binaries to VPS
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [release]
 
-    steps:
-      - uses: actions/checkout@v4
+    # Same concurrency group as deploy-web/deploy-server
+    concurrency:
+      group: vps-deploy
+      cancel-in-progress: false
 
+    steps:
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
@@ -316,37 +347,21 @@ jobs:
           name: SecureShare-build-linux
           path: dist/
 
-      - name: Copy server files to VPS
-        run: |
-          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
-            server/relay_server.py \
-            server/requirements.txt \
-            server/Dockerfile \
-            server/docker-compose.yml \
-            server/Caddyfile \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/home/${{ secrets.VPS_USER }}/secureshare-relay/
-
-      - name: Copy landing page to VPS
-        run: |
-          VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
-          DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay/www"
-          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} "mkdir -p ${DEST}"
-          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no -r \
-            server/www/* \
-            ${VPS}:${DEST}/
-
-      - name: Upload app to VPS for /download endpoint
+      - name: Upload binaries to VPS /download
         run: |
           TAG="${{ github.ref_name }}"
           VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
           DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay/downloads"
 
-          # Copy versioned .zip
+          # Ensure directory exists
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} "mkdir -p ${DEST}"
+
+          # Copy versioned Windows .zip
           scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
             dist/SecureShare-${TAG}.zip \
             ${VPS}:${DEST}/SecureShare-${TAG}.zip
 
-          # Create/overwrite SecureShare.zip as latest
+          # Create/overwrite SecureShare.zip as "latest"
           ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} \
             "cp ${DEST}/SecureShare-${TAG}.zip ${DEST}/SecureShare.zip"
 
@@ -359,64 +374,40 @@ jobs:
           ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} \
             "cp ${DEST}/SecureShare-${TAG}-linux-x64.tar.gz ${DEST}/SecureShare-linux-x64.tar.gz"
 
-          echo "Uploaded: Windows .zip + Linux .tar.gz (versioned + latest)"
+          echo "✅ Uploaded: Windows .zip + Linux .tar.gz (versioned + latest)"
 
-      - name: Deploy with docker compose
+      - name: Verify downloads are accessible
         run: |
-          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "cd /home/\$(whoami)/secureshare-relay && \
-             docker compose up -d --build --force-recreate --remove-orphans && \
-             sleep 5 && \
-             docker compose ps"
+          sleep 3
 
-      - name: Health check
-        run: |
-          echo "Waiting for server to be ready..."
-          sleep 20
-
-          # Check landing page (retry up to 3 times)
-          for i in 1 2 3; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --max-time 15 \
-              https://secureshare-relay.duckdns.org/ 2>/dev/null || echo "000")
-            echo "Attempt $i — Landing page: HTTP $STATUS"
-            if [ "$STATUS" = "200" ]; then
-              echo "✅ Landing page is UP"
-              break
-            fi
-            sleep 5
-          done
-
-          # Check health endpoint
-          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" \
-            --max-time 10 \
-            https://secureshare-relay.duckdns.org/health 2>/dev/null || echo "000")
-          echo "Health endpoint: HTTP $HEALTH"
-          if [ "$HEALTH" = "200" ]; then
-            echo "✅ Health endpoint OK"
-          else
-            echo "⚠️ Health returned: $HEALTH"
-          fi
-
-          # Check download endpoint (HEAD to avoid downloading full file)
+          # Check download endpoint (HEAD only)
           DL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             --head --max-time 15 \
             https://secureshare-relay.duckdns.org/download/SecureShare.zip 2>/dev/null || echo "000")
-          echo "Download endpoint: HTTP $DL_STATUS"
-          if [ "$DL_STATUS" = "200" ]; then
-            echo "✅ Download endpoint OK"
+          echo "Windows download: HTTP $DL_STATUS"
+
+          DL_LINUX=$(curl -s -o /dev/null -w "%{http_code}" \
+            --head --max-time 15 \
+            https://secureshare-relay.duckdns.org/download/SecureShare-linux-x64.tar.gz 2>/dev/null || echo "000")
+          echo "Linux download: HTTP $DL_LINUX"
+
+          if [ "$DL_STATUS" = "200" ] && [ "$DL_LINUX" = "200" ]; then
+            echo "✅ Both downloads accessible"
           else
-            echo "⚠️ Download returned: $DL_STATUS (may need manual check)"
+            echo "⚠️ Some downloads may need manual check"
           fi
 
       - name: Cleanup SSH key
         if: always()
         run: rm -f ~/.ssh/vps_key
 
-      - name: Deploy summary
+      - name: Upload summary
         run: |
-          echo "## Server Deploy" >> $GITHUB_STEP_SUMMARY
+          echo "## Binaries Uploaded ✅" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Server:** Deployed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "**Download:** https://secureshare-relay.duckdns.org/download/SecureShare.zip" >> $GITHUB_STEP_SUMMARY
+          echo "**Relay restart:** NO ✓ (zero downtime)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| OS | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows | https://secureshare-relay.duckdns.org/download/SecureShare.zip |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux | https://secureshare-relay.duckdns.org/download/SecureShare-linux-x64.tar.gz |" >> $GITHUB_STEP_SUMMARY
