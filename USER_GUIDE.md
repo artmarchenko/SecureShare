@@ -562,4 +562,4 @@ C:\Users\<ваше_імʼя>\AppData\Roaming\SecureShare\secureshare.log
 
 ---
 
-*SecureShare v3.3 · © 2026 Artem Marchenko*
+*SecureShare v3.3.1 · © 2026 Artem Marchenko*

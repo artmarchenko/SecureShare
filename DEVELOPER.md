@@ -2,7 +2,7 @@
 
 > Comprehensive technical documentation for developers, auditors, and contributors.
 >
-> **Version:** 3.3 · **Architecture:** VPS-only relay · **Author:** Artem Marchenko
+> **Version:** 3.3.1 · **Architecture:** VPS-only relay · **Author:** Artem Marchenko
 
 ---
 
@@ -543,7 +543,7 @@ After successful verification, both sides compute and store this token. On recon
 | Log copy/export | Buttons to copy log to clipboard or save to file |
 | Help dialog | Step-by-step instructions with colored sections |
 | Diagnostics | 5-point connectivity check: Internet, DNS, TLS, WebSocket, Latency |
-| Auto-update check | Silent check on startup + manual "🔄" button; download, verify SHA-256, install |
+| Auto-update check | Silent check on startup + manual "🔄" button; download, verify SHA-256, rename→copy→launch |
 | Donate button | "❤️" button opens Ko-fi donation page |
 | Telemetry opt-in | Toggles in Diagnostics window for crash reports and anonymous analytics |
 | Startup tips | Random informational/motivational messages on launch |
@@ -1028,4 +1028,4 @@ Secrets configured in repository settings:
 
 ---
 
-*Last updated: February 2026 · v3.3*
+*Last updated: February 2026 · v3.3.1*
