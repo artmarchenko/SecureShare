@@ -1,73 +1,71 @@
 secureshare-relay.duckdns.org {
-    # Security headers (global defaults)
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "no-referrer"
-        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
-        Cross-Origin-Opener-Policy "same-origin"
-        Cross-Origin-Resource-Policy "same-origin"
-        -Server
-    }
+	# Security headers (global defaults)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		-Server
+	}
 
-    # Health check endpoint — proxy to relay
-    handle /health {
-        header Content-Security-Policy "default-src 'none'"
-        reverse_proxy relay:8766
-    }
+	# Health check endpoint — proxy to relay
+	handle /health {
+		header Content-Security-Policy "default-src 'none'"
+		reverse_proxy relay:8766
+	}
 
-    # Public version endpoint — cacheable, no auth needed
-    handle /api/version {
-        header Content-Security-Policy "default-src 'none'"
-        header Cache-Control "public, max-age=300"
-        reverse_proxy relay:8766
-    }
+	# Public version endpoint — cacheable, no auth needed
+	handle /api/version {
+		header Content-Security-Policy "default-src 'none'"
+		header Cache-Control "public, max-age=300"
+		reverse_proxy relay:8766
+	}
 
-    # API endpoints — proxy to relay (crash reports, telemetry, admin)
-    handle /api/* {
-        header Content-Security-Policy "default-src 'none'"
-        header Cache-Control "no-store"
-        reverse_proxy relay:8766 {
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Real-IP {remote_host}
-        }
-    }
+	# API endpoints — proxy to relay (crash reports, telemetry, admin)
+	handle /api/* {
+		header Content-Security-Policy "default-src 'none'"
+		header Cache-Control "no-store"
+		reverse_proxy relay:8766 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
-    # Admin dashboard — static page + API calls
-    handle /admin {
-        header Content-Security-Policy "default-src 'self'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:"
-        root * /www
-        rewrite * /admin.html
-        file_server
-    }
+	# Admin dashboard — static page + API calls
+	handle /admin {
+		header Content-Security-Policy "default-src 'self'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:"
+		root * /www
+		rewrite * /admin.html
+		file_server
+	}
 
-    # App download — static files from /downloads
-    handle /download/* {
-        header Content-Security-Policy "default-src 'none'"
-        header Content-Disposition "attachment"
-        header Cache-Control "no-cache"
-        uri strip_prefix /download
-        root * /downloads
-        file_server
-    }
+	# App download — static files from /downloads
+	handle /download/* {
+		header Content-Security-Policy "default-src 'none'"
+		header Content-Disposition "attachment"
+		header Cache-Control "no-cache"
+		uri strip_prefix /download
+		root * /downloads
+		file_server
+	}
 
-    # WebSocket relay — proxy only WS connections
-    @websocket {
-        header Connection *Upgrade*
-        header Upgrade    websocket
-    }
-    handle @websocket {
-        reverse_proxy relay:8765 {
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Real-IP {remote_host}
-        }
-    }
+	# WebSocket relay — proxy only WS connections
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @websocket {
+		reverse_proxy relay:8765 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
-    # Landing page — static site (everything else)
-    handle {
-        header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'"
-        root * /www
-        file_server
-    }
+	# Landing page — static site (everything else)
+	handle {
+		header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'"
+		root * /www
+		file_server
+	}
 }
