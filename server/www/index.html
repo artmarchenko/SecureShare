@@ -492,6 +492,44 @@
       flex-wrap: wrap;
     }
 
+    /* ── Language Toggle ──────────────────────────── */
+    .lang-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      display: flex;
+      background: rgba(11,25,41,.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 28px;
+      border: 1px solid rgba(255,255,255,.12);
+      padding: 4px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.25);
+    }
+    .lang-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 24px;
+      background: transparent;
+      color: rgba(255,255,255,.6);
+      font-size: .85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .25s;
+      white-space: nowrap;
+    }
+    .lang-btn:hover { color: rgba(255,255,255,.85); }
+    .lang-btn.active {
+      background: linear-gradient(135deg, var(--blue), #42A5F5);
+      color: var(--white);
+      box-shadow: 0 2px 12px rgba(21,101,192,.4);
+    }
+    .lang-flag { font-size: 1.1rem; line-height: 1; }
+
     /* ── Responsive ────────────────────────────────── */
     @media (max-width: 768px) {
       .hero { padding: 60px 0 80px; }
@@ -499,17 +537,29 @@
       .steps { flex-direction: column; gap: 32px; }
       .step-arrow { display: none; }
       .features, .how-it-works, .security { padding: 60px 0; }
+      .lang-toggle { top: 12px; right: 12px; }
+      .lang-btn { padding: 6px 12px; font-size: .8rem; }
     }
   </style>
 </head>
 <body>
+
+  <!-- Language Toggle -->
+  <div class="lang-toggle">
+    <button class="lang-btn active" data-lang="uk" onclick="setLang('uk')">
+      <span class="lang-flag">🇺🇦</span> UA
+    </button>
+    <button class="lang-btn" data-lang="en" onclick="setLang('en')">
+      <span class="lang-flag">🇬🇧</span> EN
+    </button>
+  </div>
 
   <!-- Hero -->
   <section class="hero">
     <div class="container hero-content">
       <img src="/logo.png" alt="SecureShare" class="hero-logo" width="120" height="120">
       <h1>Secure<span>Share</span></h1>
-      <p>Передавайте файли напряму між пристроями з наскрізним шифруванням. Без реєстрації, без хмари, без слідів.</p>
+      <p data-i18n="hero_subtitle">Передавайте файли напряму між пристроями з наскрізним шифруванням. Без реєстрації, без хмари, без слідів.</p>
       <div class="hero-badges">
         <span class="badge">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -517,11 +567,11 @@
         </span>
         <span class="badge">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          Без реєстрації
+          <span data-i18n="badge_no_reg">Без реєстрації</span>
         </span>
         <span class="badge">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          До 5 ГБ
+          <span data-i18n="badge_5gb">До 5 ГБ</span>
         </span>
         <span class="badge">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -548,50 +598,50 @@
   <!-- Features -->
   <section class="features" id="features">
     <div class="container">
-      <h2 class="section-title">Чому SecureShare?</h2>
-      <p class="section-sub">Створено для тих, хто цінує приватність та простоту</p>
+      <h2 class="section-title" data-i18n="features_title">Чому SecureShare?</h2>
+      <p class="section-sub" data-i18n="features_sub">Створено для тих, хто цінує приватність та простоту</p>
       <div class="features-grid">
         <div class="feature-card">
           <div class="feature-icon blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
           </div>
-          <h3>Наскрізне шифрування</h3>
-          <p>X25519 обмін ключами + AES-256-GCM. Сервер бачить лише шифротекст — ніколи ваші дані.</p>
+          <h3 data-i18n="feat_e2e_title">Наскрізне шифрування</h3>
+          <p data-i18n="feat_e2e_desc">X25519 обмін ключами + AES-256-GCM. Сервер бачить лише шифротекст — ніколи ваші дані.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" y1="11" x2="23" y2="11"/></svg>
           </div>
-          <h3>Без реєстрації</h3>
-          <p>Не потрібен акаунт, email чи телефон. Просто відкрийте програму та поділіться кодом сесії.</p>
+          <h3 data-i18n="feat_noreg_title">Без реєстрації</h3>
+          <p data-i18n="feat_noreg_desc">Не потрібен акаунт, email чи телефон. Просто відкрийте програму та поділіться кодом сесії.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
           </div>
-          <h3>До 5 ГБ</h3>
-          <p>Передавайте великі файли без обмежень хмарних сервісів. Відновлення перерваних передач включено.</p>
+          <h3 data-i18n="feat_5gb_title">До 5 ГБ</h3>
+          <p data-i18n="feat_5gb_desc">Передавайте великі файли без обмежень хмарних сервісів. Відновлення перерваних передач включено.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           </div>
-          <h3>Авто-перепідключення</h3>
-          <p>Обірвався зв'язок? Програма автоматично перепідключиться та продовжить з місця зупинки.</p>
+          <h3 data-i18n="feat_reconnect_title">Авто-перепідключення</h3>
+          <p data-i18n="feat_reconnect_desc">Обірвався зв'язок? Програма автоматично перепідключиться та продовжить з місця зупинки.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
           </div>
-          <h3>Верифікація</h3>
-          <p>Код верифікації гарантує, що ви спілкуєтесь саме з потрібною людиною. Захист від MITM-атак.</p>
+          <h3 data-i18n="feat_verify_title">Верифікація</h3>
+          <p data-i18n="feat_verify_desc">Код верифікації гарантує, що ви спілкуєтесь саме з потрібною людиною. Захист від MITM-атак.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           </div>
-          <h3>Без хмарного зберігання</h3>
-          <p>Файли передаються напряму. Нічого не зберігається на сервері — нуль слідів після передачі.</p>
+          <h3 data-i18n="feat_nocloud_title">Без хмарного зберігання</h3>
+          <p data-i18n="feat_nocloud_desc">Файли передаються напряму. Нічого не зберігається на сервері — нуль слідів після передачі.</p>
         </div>
       </div>
     </div>
@@ -600,25 +650,25 @@
   <!-- How It Works -->
   <section class="how-it-works" id="how">
     <div class="container">
-      <h2 class="section-title">Як це працює?</h2>
-      <p class="section-sub">Три прості кроки — і файл у безпеці</p>
+      <h2 class="section-title" data-i18n="how_title">Як це працює?</h2>
+      <p class="section-sub" data-i18n="how_sub">Три прості кроки — і файл у безпеці</p>
       <div class="steps">
         <div class="step">
           <div class="step-num">1</div>
-          <h3>Відправник створює сесію</h3>
-          <p>Натисніть «Надіслати», оберіть файл. Програма генерує унікальний код сесії з 8 символів.</p>
+          <h3 data-i18n="step1_title">Відправник створює сесію</h3>
+          <p data-i18n="step1_desc">Натисніть «Надіслати», оберіть файл. Програма генерує унікальний код сесії з 8 символів.</p>
           <span class="step-arrow">&#10230;</span>
         </div>
         <div class="step">
           <div class="step-num">2</div>
-          <h3>Отримувач підключається</h3>
-          <p>Введіть код у себе в програмі. Обидва пристрої обмінюються ключами та верифікують з'єднання.</p>
+          <h3 data-i18n="step2_title">Отримувач підключається</h3>
+          <p data-i18n="step2_desc">Введіть код у себе в програмі. Обидва пристрої обмінюються ключами та верифікують з'єднання.</p>
           <span class="step-arrow">&#10230;</span>
         </div>
         <div class="step">
           <div class="step-num">3</div>
-          <h3>Файл передається</h3>
-          <p>Дані шифруються на пристрої відправника та розшифровуються тільки у отримувача. Сервер бачить лише шум.</p>
+          <h3 data-i18n="step3_title">Файл передається</h3>
+          <p data-i18n="step3_desc">Дані шифруються на пристрої відправника та розшифровуються тільки у отримувача. Сервер бачить лише шум.</p>
         </div>
       </div>
     </div>
@@ -627,50 +677,50 @@
   <!-- Security -->
   <section class="security" id="security">
     <div class="container">
-      <h2 class="section-title">Безпека на першому місці</h2>
-      <p class="section-sub">Кожен аспект розроблений з акцентом на приватність</p>
+      <h2 class="section-title" data-i18n="sec_title">Безпека на першому місці</h2>
+      <p class="section-sub" data-i18n="sec_sub">Кожен аспект розроблений з акцентом на приватність</p>
       <div class="security-grid">
         <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             X25519 + HKDF-SHA256
           </h3>
-          <p>Еліптичний обмін Діффі-Хеллмана для генерації спільного ключа без передачі секретів по мережі.</p>
+          <p data-i18n="sec_x25519">Еліптичний обмін Діффі-Хеллмана для генерації спільного ключа без передачі секретів по мережі.</p>
         </div>
         <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            AES-256-GCM з AAD
+            <span data-i18n="sec_aes_title">AES-256-GCM з AAD</span>
           </h3>
-          <p>Шифрування з аутентифікацією. Код сесії прив'язаний як Associated Data — запобігає підміні шифротексту.</p>
+          <p data-i18n="sec_aes">Шифрування з аутентифікацією. Код сесії прив'язаний як Associated Data — запобігає підміні шифротексту.</p>
         </div>
         <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            SHA-256 контроль цілісності
+            <span data-i18n="sec_sha_title">SHA-256 контроль цілісності</span>
           </h3>
-          <p>Кожен переданий файл перевіряється хешем. Навіть один змінений байт буде виявлено.</p>
+          <p data-i18n="sec_sha">Кожен переданий файл перевіряється хешем. Навіть один змінений байт буде виявлено.</p>
         </div>
         <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            TLS 1.3 транспорт
+            <span data-i18n="sec_tls_title">TLS 1.3 транспорт</span>
           </h3>
-          <p>WebSocket через WSS з автоматичним сертифікатом Let's Encrypt. Подвійний шар шифрування.</p>
+          <p data-i18n="sec_tls">WebSocket через WSS з автоматичним сертифікатом Let's Encrypt. Подвійний шар шифрування.</p>
         </div>
         <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            Zero-knowledge сервер
+            <span data-i18n="sec_zk_title">Zero-knowledge сервер</span>
           </h3>
-          <p>Relay сервер ніколи не бачить вміст файлів. Коди сесій хешуються — жодних логів контенту.</p>
+          <p data-i18n="sec_zk">Relay сервер ніколи не бачить вміст файлів. Коди сесій хешуються — жодних логів контенту.</p>
         </div>
         <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            Відкритий код
+            <span data-i18n="sec_oss_title">Відкритий код</span>
           </h3>
-          <p>Весь код доступний на GitHub. Перевіряйте, аудитуйте, пропонуйте покращення.</p>
+          <p data-i18n="sec_oss">Весь код доступний на GitHub. Перевіряйте, аудитуйте, пропонуйте покращення.</p>
         </div>
       </div>
     </div>
@@ -679,8 +729,8 @@
   <!-- CTA -->
   <section class="cta">
     <div class="container">
-      <h2>Готові передавати файли безпечно?</h2>
-      <p>Завантажте SecureShare безкоштовно. Без реєстрації, без обмежень.</p>
+      <h2 data-i18n="cta_title">Готові передавати файли безпечно?</h2>
+      <p data-i18n="cta_sub">Завантажте SecureShare безкоштовно. Без реєстрації, без обмежень.</p>
       <div class="hero-buttons" style="justify-content: center;">
         <a href="/download/SecureShare.zip" class="btn btn-primary">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -697,26 +747,26 @@
   <!-- Changelog -->
   <section class="changelog" id="changelog">
     <div class="container">
-      <h2 class="section-title">Історія розвитку</h2>
-      <p class="section-sub">Проєкт активно розвивається — кожна версія робить передачу файлів безпечнішою та зручнішою</p>
+      <h2 class="section-title" data-i18n="changelog_title">Історія розвитку</h2>
+      <p class="section-sub" data-i18n="changelog_sub">Проєкт активно розвивається — кожна версія робить передачу файлів безпечнішою та зручнішою</p>
       <div class="timeline">
 
         <div class="tl-item latest">
           <div class="tl-dot"></div>
           <div class="tl-header">
             <span class="tl-version">v3.3.1</span>
-            <span class="tl-date">Лютий 2026</span>
-            <span class="tl-tag security">Безпека</span>
+            <span class="tl-date" data-i18n="date_feb_2026">Лютий 2026</span>
+            <span class="tl-tag security" data-i18n="tag_security">Безпека</span>
           </div>
           <ul class="tl-changes">
-            <li class="sec">Комплексний аудит безпеки: 87 тестів, 6 виправлених вразливостей</li>
-            <li class="sec">Захист від IP-спуфінгу, CRLF-ін'єкцій, memory DoS</li>
-            <li class="sec">CVE-2026-26007 — оновлення криптографічних бібліотек</li>
-            <li class="feat">pip-audit в CI — автоматичний моніторинг CVE</li>
-            <li class="feat">Надійне автооновлення: rename+copy замість bat-скрипта</li>
-            <li class="feat">Захист від оновлення з архіву/тимчасових папок</li>
-            <li class="fix">Редизайн UI: тулбар з підписаними кнопками, нові секції довідки</li>
-            <li class="fix">Сумісність CI-білдів: пінінг Python 3.12.10 + PyInstaller 6.19.0</li>
+            <li class="sec" data-i18n="cl_331_1">Комплексний аудит безпеки: 87 тестів, 6 виправлених вразливостей</li>
+            <li class="sec" data-i18n="cl_331_2">Захист від IP-спуфінгу, CRLF-ін'єкцій, memory DoS</li>
+            <li class="sec" data-i18n="cl_331_3">CVE-2026-26007 — оновлення криптографічних бібліотек</li>
+            <li class="feat" data-i18n="cl_331_4">pip-audit в CI — автоматичний моніторинг CVE</li>
+            <li class="feat" data-i18n="cl_331_5">Надійне автооновлення: rename+copy замість bat-скрипта</li>
+            <li class="feat" data-i18n="cl_331_6">Захист від оновлення з архіву/тимчасових папок</li>
+            <li class="fix" data-i18n="cl_331_7">Редизайн UI: тулбар з підписаними кнопками, нові секції довідки</li>
+            <li class="fix" data-i18n="cl_331_8">Сумісність CI-білдів: пінінг Python 3.12.10 + PyInstaller 6.19.0</li>
           </ul>
         </div>
 
@@ -724,16 +774,16 @@
           <div class="tl-dot"></div>
           <div class="tl-header">
             <span class="tl-version">v3.3.0</span>
-            <span class="tl-date">Лютий 2026</span>
-            <span class="tl-tag feature">Великий реліз</span>
+            <span class="tl-date" data-i18n="date_feb_2026">Лютий 2026</span>
+            <span class="tl-tag feature" data-i18n="tag_major">Великий реліз</span>
           </div>
           <ul class="tl-changes">
-            <li class="feat">Автоматичне оновлення з перевіркою SHA-256 та цілісності</li>
-            <li class="feat">Анонімна телеметрія та crash-reporting</li>
-            <li class="feat">Адмін-дашборд з графіками та статистикою</li>
-            <li class="feat">Підтримка донатів через Ko-fi</li>
-            <li class="feat">Розділення CI/CD на 4 незалежні воркфлоу</li>
-            <li class="sec">MIT ліцензія — повністю відкритий код</li>
+            <li class="feat" data-i18n="cl_330_1">Автоматичне оновлення з перевіркою SHA-256 та цілісності</li>
+            <li class="feat" data-i18n="cl_330_2">Анонімна телеметрія та crash-reporting</li>
+            <li class="feat" data-i18n="cl_330_3">Адмін-дашборд з графіками та статистикою</li>
+            <li class="feat" data-i18n="cl_330_4">Підтримка донатів через Ko-fi</li>
+            <li class="feat" data-i18n="cl_330_5">Розділення CI/CD на 4 незалежні воркфлоу</li>
+            <li class="sec" data-i18n="cl_330_6">MIT ліцензія — повністю відкритий код</li>
           </ul>
         </div>
 
@@ -741,15 +791,15 @@
           <div class="tl-dot"></div>
           <div class="tl-header">
             <span class="tl-version">v3.2</span>
-            <span class="tl-date">Лютий 2026</span>
-            <span class="tl-tag feature">Фічі</span>
+            <span class="tl-date" data-i18n="date_feb_2026">Лютий 2026</span>
+            <span class="tl-tag feature" data-i18n="tag_features">Фічі</span>
           </div>
           <ul class="tl-changes">
-            <li class="feat">Збірка для Linux — кросплатформенність</li>
-            <li class="feat">Авто-перепідключення при обриві зв'язку</li>
-            <li class="feat">Відновлення перерваних передач (resume)</li>
-            <li class="feat">Лендінг для relay-сервера</li>
-            <li class="fix">DNS retry — стабільніші з'єднання</li>
+            <li class="feat" data-i18n="cl_32_1">Збірка для Linux — кросплатформенність</li>
+            <li class="feat" data-i18n="cl_32_2">Авто-перепідключення при обриві зв'язку</li>
+            <li class="feat" data-i18n="cl_32_3">Відновлення перерваних передач (resume)</li>
+            <li class="feat" data-i18n="cl_32_4">Лендінг для relay-сервера</li>
+            <li class="fix" data-i18n="cl_32_5">DNS retry — стабільніші з'єднання</li>
           </ul>
         </div>
 
@@ -757,23 +807,23 @@
           <div class="tl-dot"></div>
           <div class="tl-header">
             <span class="tl-version">v3.0</span>
-            <span class="tl-date">Січень 2026</span>
-            <span class="tl-tag release">Перший реліз</span>
+            <span class="tl-date" data-i18n="date_jan_2026">Січень 2026</span>
+            <span class="tl-tag release" data-i18n="tag_first_release">Перший реліз</span>
           </div>
           <ul class="tl-changes">
-            <li class="feat">E2E шифрування: X25519 + AES-256-GCM + SHA-256</li>
-            <li class="feat">VPS relay-сервер з Docker + Caddy + TLS 1.3</li>
-            <li class="feat">Зручний GUI з прогрес-баром та верифікацією</li>
-            <li class="feat">CI/CD: автоматична збірка, тести, деплой</li>
-            <li class="sec">Пентест та базове зміцнення безпеки</li>
-            <li class="feat">Документація для користувачів і розробників</li>
+            <li class="feat" data-i18n="cl_30_1">E2E шифрування: X25519 + AES-256-GCM + SHA-256</li>
+            <li class="feat" data-i18n="cl_30_2">VPS relay-сервер з Docker + Caddy + TLS 1.3</li>
+            <li class="feat" data-i18n="cl_30_3">Зручний GUI з прогрес-баром та верифікацією</li>
+            <li class="feat" data-i18n="cl_30_4">CI/CD: автоматична збірка, тести, деплой</li>
+            <li class="sec" data-i18n="cl_30_5">Пентест та базове зміцнення безпеки</li>
+            <li class="feat" data-i18n="cl_30_6">Документація для користувачів і розробників</li>
           </ul>
         </div>
 
       </div>
       <div class="tl-more">
         <a href="https://github.com/artmarchenko/SecureShare/releases" target="_blank" rel="noopener">
-          Усі релізи на GitHub
+          <span data-i18n="all_releases">Усі релізи на GitHub</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
         </a>
       </div>
@@ -784,37 +834,37 @@
   <section class="support" id="support">
     <div class="container">
       <span class="support-emoji">☕</span>
-      <h2 class="section-title">Підтримайте проєкт</h2>
-      <p class="support-text">
+      <h2 class="section-title" data-i18n="support_title">Підтримайте проєкт</h2>
+      <p class="support-text" data-i18n="support_text1">
         SecureShare — це <strong>безкоштовний open-source проєкт</strong>, створений однією людиною у вільний час.
         Сервер, домен і розробка коштують грошей, а мотивація — вашої підтримки.
       </p>
-      <p class="support-text">
+      <p class="support-text" data-i18n="support_text2">
         Кожна чашка кави допомагає тримати relay-сервер онлайн, покращувати безпеку
         та додавати нові фічі. Навіть маленький донат — це сигнал, що проєкт потрібен&nbsp;людям&nbsp;💛
       </p>
       <div class="support-details">
         <div class="support-item">
           <div class="support-item-icon">🖥️</div>
-          <h4>Сервер</h4>
-          <p>Relay працює 24/7 для вас</p>
+          <h4 data-i18n="support_server">Сервер</h4>
+          <p data-i18n="support_server_desc">Relay працює 24/7 для вас</p>
         </div>
         <div class="support-item">
           <div class="support-item-icon">🔒</div>
-          <h4>Безпека</h4>
-          <p>Аудити, оновлення, патчі</p>
+          <h4 data-i18n="support_security">Безпека</h4>
+          <p data-i18n="support_security_desc">Аудити, оновлення, патчі</p>
         </div>
         <div class="support-item">
           <div class="support-item-icon">🚀</div>
-          <h4>Розвиток</h4>
-          <p>Нові платформи та фічі</p>
+          <h4 data-i18n="support_dev">Розвиток</h4>
+          <p data-i18n="support_dev_desc">Нові платформи та фічі</p>
         </div>
       </div>
       <a href="https://ko-fi.com/secureshare" class="btn-donate" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-        Пригостити кавою
+        <span data-i18n="support_btn">Пригостити кавою</span>
       </a>
-      <p class="support-note">
+      <p class="support-note" data-i18n="support_note">
         ⭐ Також можете поставити зірку на <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a> — це безкоштовно і дуже мотивує!
       </p>
     </div>
@@ -825,15 +875,172 @@
     <div class="container">
       <div class="footer-links">
         <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/artmarchenko/SecureShare/blob/main/USER_GUIDE.md" target="_blank" rel="noopener">Документація</a>
-        <a href="https://github.com/artmarchenko/SecureShare/blob/main/DEVELOPER.md" target="_blank" rel="noopener">Для розробників</a>
-        <a href="#changelog">Що нового</a>
-        <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener">Повідомити про баг</a>
-        <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener">☕ Підтримати</a>
+        <a href="https://github.com/artmarchenko/SecureShare/blob/main/USER_GUIDE.md" target="_blank" rel="noopener" data-i18n="footer_docs">Документація</a>
+        <a href="https://github.com/artmarchenko/SecureShare/blob/main/DEVELOPER.md" target="_blank" rel="noopener" data-i18n="footer_devs">Для розробників</a>
+        <a href="#changelog" data-i18n="footer_changelog">Що нового</a>
+        <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener" data-i18n="footer_bug">Повідомити про баг</a>
+        <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener" data-i18n="footer_support">☕ Підтримати</a>
       </div>
       <p>SecureShare v3.3.1 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
     </div>
   </footer>
+
+  <!-- i18n -->
+  <script>
+  (function() {
+    var T = {
+      en: {
+        // Hero
+        hero_subtitle: "Transfer files directly between devices with end-to-end encryption. No registration, no cloud, no traces.",
+        badge_no_reg: "No registration",
+        badge_5gb: "Up to 5 GB",
+
+        // Features
+        features_title: "Why SecureShare?",
+        features_sub: "Built for those who value privacy and simplicity",
+        feat_e2e_title: "End-to-end encryption",
+        feat_e2e_desc: "X25519 key exchange + AES-256-GCM. The server only sees ciphertext — never your data.",
+        feat_noreg_title: "No registration",
+        feat_noreg_desc: "No account, email, or phone needed. Just open the app and share the session code.",
+        feat_5gb_title: "Up to 5 GB",
+        feat_5gb_desc: "Transfer large files without cloud service limits. Interrupted transfer resumption included.",
+        feat_reconnect_title: "Auto-reconnect",
+        feat_reconnect_desc: "Lost connection? The app will automatically reconnect and resume from where it left off.",
+        feat_verify_title: "Verification",
+        feat_verify_desc: "Verification code ensures you're communicating with the right person. MITM attack protection.",
+        feat_nocloud_title: "No cloud storage",
+        feat_nocloud_desc: "Files are transferred directly. Nothing is stored on the server — zero traces after transfer.",
+
+        // How It Works
+        how_title: "How does it work?",
+        how_sub: "Three simple steps — and your file is secure",
+        step1_title: "Sender creates a session",
+        step1_desc: "Click \"Send\", choose a file. The app generates a unique 8-character session code.",
+        step2_title: "Receiver connects",
+        step2_desc: "Enter the code in your app. Both devices exchange keys and verify the connection.",
+        step3_title: "File is transferred",
+        step3_desc: "Data is encrypted on the sender's device and decrypted only on the receiver's. The server sees only noise.",
+
+        // Security
+        sec_title: "Security first",
+        sec_sub: "Every aspect is designed with privacy in mind",
+        sec_x25519: "Elliptic-curve Diffie-Hellman for generating a shared key without transmitting secrets over the network.",
+        sec_aes_title: "AES-256-GCM with AAD",
+        sec_aes: "Authenticated encryption. Session code is bound as Associated Data — prevents ciphertext substitution.",
+        sec_sha_title: "SHA-256 integrity check",
+        sec_sha: "Every transferred file is verified by hash. Even a single changed byte will be detected.",
+        sec_tls_title: "TLS 1.3 transport",
+        sec_tls: "WebSocket over WSS with automatic Let's Encrypt certificate. Double layer of encryption.",
+        sec_zk_title: "Zero-knowledge server",
+        sec_zk: "The relay server never sees file contents. Session codes are hashed — no content logs whatsoever.",
+        sec_oss_title: "Open source",
+        sec_oss: "All code is available on GitHub. Review, audit, and suggest improvements.",
+
+        // CTA
+        cta_title: "Ready to transfer files securely?",
+        cta_sub: "Download SecureShare for free. No registration, no limits.",
+
+        // Changelog
+        changelog_title: "Development history",
+        changelog_sub: "The project is actively evolving — each version makes file transfer more secure and convenient",
+        date_feb_2026: "February 2026",
+        date_jan_2026: "January 2026",
+        tag_security: "Security",
+        tag_major: "Major release",
+        tag_features: "Features",
+        tag_first_release: "First release",
+        cl_331_1: "Comprehensive security audit: 87 tests, 6 vulnerabilities fixed",
+        cl_331_2: "Protection against IP spoofing, CRLF injection, memory DoS",
+        cl_331_3: "CVE-2026-26007 — cryptographic library updates",
+        cl_331_4: "pip-audit in CI — automatic CVE monitoring",
+        cl_331_5: "Reliable auto-update: rename+copy instead of bat script",
+        cl_331_6: "Protection against updating from archive/temp folders",
+        cl_331_7: "UI redesign: toolbar with labeled buttons, new help sections",
+        cl_331_8: "CI build compatibility: pinned Python 3.12.10 + PyInstaller 6.19.0",
+        cl_330_1: "Auto-update with SHA-256 verification and integrity check",
+        cl_330_2: "Anonymous telemetry and crash reporting",
+        cl_330_3: "Admin dashboard with charts and statistics",
+        cl_330_4: "Donation support via Ko-fi",
+        cl_330_5: "CI/CD split into 4 independent workflows",
+        cl_330_6: "MIT license — fully open source",
+        cl_32_1: "Linux build — cross-platform support",
+        cl_32_2: "Auto-reconnect on connection loss",
+        cl_32_3: "Interrupted transfer resumption (resume)",
+        cl_32_4: "Landing page for relay server",
+        cl_32_5: "DNS retry — more stable connections",
+        cl_30_1: "E2E encryption: X25519 + AES-256-GCM + SHA-256",
+        cl_30_2: "VPS relay server with Docker + Caddy + TLS 1.3",
+        cl_30_3: "User-friendly GUI with progress bar and verification",
+        cl_30_4: "CI/CD: automated build, tests, deployment",
+        cl_30_5: "Pentest and basic security hardening",
+        cl_30_6: "Documentation for users and developers",
+        all_releases: "All releases on GitHub",
+
+        // Support
+        support_title: "Support the project",
+        support_text1: "SecureShare is a <strong>free open-source project</strong> created by one person in their spare time. Server, domain, and development cost money, and motivation needs your support.",
+        support_text2: "Every cup of coffee helps keep the relay server online, improve security, and add new features. Even a small donation is a signal that this project matters to people\u00a0\ud83d\udc9b",
+        support_server: "Server",
+        support_server_desc: "Relay runs 24/7 for you",
+        support_security: "Security",
+        support_security_desc: "Audits, updates, patches",
+        support_dev: "Development",
+        support_dev_desc: "New platforms and features",
+        support_btn: "Buy me a coffee",
+        support_note: "\u2b50 You can also star us on <a href=\"https://github.com/artmarchenko/SecureShare\" target=\"_blank\" rel=\"noopener\">GitHub</a> — it's free and very motivating!",
+
+        // Footer
+        footer_docs: "Documentation",
+        footer_devs: "For developers",
+        footer_changelog: "What's new",
+        footer_bug: "Report a bug",
+        footer_support: "\u2615 Support"
+      }
+    };
+
+    // Ukrainian originals stored on first load
+    var ukTexts = {};
+    var currentLang = localStorage.getItem('ss_lang') || 'uk';
+
+    function cachUk() {
+      document.querySelectorAll('[data-i18n]').forEach(function(el) {
+        ukTexts[el.getAttribute('data-i18n')] = el.innerHTML;
+      });
+    }
+
+    function applyLang(lang) {
+      document.querySelectorAll('[data-i18n]').forEach(function(el) {
+        var key = el.getAttribute('data-i18n');
+        if (lang === 'uk') {
+          if (ukTexts[key]) el.innerHTML = ukTexts[key];
+        } else if (T[lang] && T[lang][key]) {
+          el.innerHTML = T[lang][key];
+        }
+      });
+      // Update HTML lang attr & page title
+      document.documentElement.lang = lang === 'uk' ? 'uk' : 'en';
+      document.title = lang === 'uk'
+        ? 'SecureShare \u2014 \u0411\u0435\u0437\u043f\u0435\u0447\u043d\u0430 \u043f\u0435\u0440\u0435\u0434\u0430\u0447\u0430 \u0444\u0430\u0439\u043b\u0456\u0432'
+        : 'SecureShare \u2014 Secure File Transfer';
+
+      // Toggle active button
+      document.querySelectorAll('.lang-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-lang') === lang);
+      });
+    }
+
+    // Global setter
+    window.setLang = function(lang) {
+      currentLang = lang;
+      localStorage.setItem('ss_lang', lang);
+      applyLang(lang);
+    };
+
+    // Init on DOM ready
+    cachUk();
+    if (currentLang !== 'uk') applyLang(currentLang);
+  })();
+  </script>
 
 </body>
 </html>
