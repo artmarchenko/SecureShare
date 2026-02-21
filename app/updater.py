@@ -707,9 +707,10 @@ def install_and_restart(
     """Install the update and restart the application.
 
     On Windows:
-      - Creates a .bat script that waits for the current process to exit,
-        backs up the old .exe, replaces it, and launches the new version.
-      - Returns True + calls sys.exit(0) to let the .bat script take over.
+      - Renames the running .exe to .exe.bak (Windows allows this).
+      - Copies the new binary into the original path.
+      - Launches the new exe as a detached process.
+      - Calls os._exit(0) to terminate the current process.
 
     On Linux:
       - Directly replaces the binary and restarts via os.execv.
@@ -739,95 +740,82 @@ def _install_windows(
     current_exe: Path,
     status_cb: Callable[[str], None],
 ) -> tuple[bool, str]:
-    """Windows: create a batch script that replaces the exe after exit."""
+    """Windows: rename running exe, copy new one in place, launch, exit.
+
+    Windows allows renaming (but not deleting/overwriting) a running .exe.
+    This is much more reliable than the bat-script approach because:
+      - No hidden cmd.exe window needed
+      - No PID polling race conditions
+      - Immediate launch of the new version
+    """
     backup_path = current_exe.with_suffix(".exe.bak")
-    pid = os.getpid()
 
-    # Build batch script — all paths are hardcoded constants,
-    # no user input is interpolated → no injection risk.
-    # Using repr() for paths to handle spaces correctly.
-    cur = str(current_exe)
-    bak = str(backup_path)
-    new = str(new_binary)
-
-    script = (
-        '@echo off\r\n'
-        'chcp 65001 >nul 2>&1\r\n'
-        'echo SecureShare: installing update...\r\n'
-        'set /a count=0\r\n'
-        ':wait\r\n'
-        f'tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL\r\n'
-        'if not errorlevel 1 (\r\n'
-        '    set /a count+=1\r\n'
-        '    if %count% geq 30 (\r\n'
-        '        echo ERROR: Timeout waiting for old process.\r\n'
-        '        goto cleanup\r\n'
-        '    )\r\n'
-        '    timeout /t 1 /nobreak >NUL\r\n'
-        '    goto wait\r\n'
-        ')\r\n'
-        'echo Old process exited.\r\n'
-        '\r\n'
-        ':: Backup current exe\r\n'
-        f'if exist "{cur}" (\r\n'
-        f'    copy /Y "{cur}" "{bak}" >NUL 2>&1\r\n'
-        '    echo Backup created.\r\n'
-        ')\r\n'
-        '\r\n'
-        ':: Replace with new exe\r\n'
-        f'copy /Y "{new}" "{cur}" >NUL 2>&1\r\n'
-        'if errorlevel 1 (\r\n'
-        '    echo ERROR: Failed to install. Restoring backup...\r\n'
-        f'    if exist "{bak}" (\r\n'
-        f'        copy /Y "{bak}" "{cur}" >NUL\r\n'
-        '    )\r\n'
-        '    pause\r\n'
-        '    goto cleanup\r\n'
-        ')\r\n'
-        '\r\n'
-        'echo Update installed successfully.\r\n'
-        f'start "" "{cur}"\r\n'
-        '\r\n'
-        ':cleanup\r\n'
-        f'del /Q "{new}" >NUL 2>&1\r\n'
-        ':: Self-delete\r\n'
-        'del "%~f0" >NUL 2>&1\r\n'
-    )
-
-    bat_path = new_binary.parent / "_secureshare_updater.bat"
     try:
-        with open(bat_path, "w", encoding="utf-8") as f:
-            f.write(script)
+        status_cb("Встановлюю оновлення...")
 
-        status_cb("Запускаю оновлення та перезавантаження...")
+        # 1. Remove old backup if exists
+        if backup_path.exists():
+            try:
+                backup_path.unlink()
+            except OSError:
+                pass  # Will be overwritten by rename
 
-        # Launch the batch script in a hidden window
+        # 2. Rename the running exe → .exe.bak
+        #    (Windows allows renaming a running executable)
+        try:
+            os.replace(str(current_exe), str(backup_path))
+            status_cb("Резервна копія створена")
+        except OSError as rename_err:
+            return False, f"Cannot rename running exe: {rename_err}"
+
+        # 3. Copy the new binary into the original path
+        try:
+            shutil.copy2(str(new_binary), str(current_exe))
+            status_cb("Оновлення встановлено")
+        except OSError as copy_err:
+            # Rollback: restore the backup
+            try:
+                os.replace(str(backup_path), str(current_exe))
+            except OSError:
+                pass
+            return False, f"Cannot copy new binary: {copy_err}"
+
+        # 4. Launch the new exe
+        status_cb("Запускаю нову версію...")
+        log.info("[Updater] Launching new version: %s", current_exe)
+
         subprocess.Popen(
-            ["cmd.exe", "/c", str(bat_path)],
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            [str(current_exe)],
+            creationflags=subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
 
-        # Exit current process so the bat script can replace the exe
-        status_cb("Завершую для оновлення...")
-        log.info("Updater launched (PID %d), exiting for update...", pid)
+        # 5. Clean up temp download
+        try:
+            new_binary.unlink(missing_ok=True)
+            temp_dir = new_binary.parent
+            if temp_dir.name.startswith("tmp"):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except OSError:
+            pass
 
-        # Give the bat script a moment to start
+        # 6. Exit the current (old) process
+        status_cb("Завершую стару версію...")
+        log.info("[Updater] Exiting old process (PID %d)...", os.getpid())
+
+        # os._exit() terminates the entire process immediately,
+        # including the main Tkinter thread. sys.exit() would only
+        # raise SystemExit in this daemon thread.
         import time as _time
-        _time.sleep(0.5)
-
-        # os._exit() is required because sys.exit() only raises
-        # SystemExit in the current thread. When called from a
-        # daemon thread (Tkinter update worker), the main GUI
-        # thread would keep running and hold the .exe file lock.
-        # os._exit() terminates the entire process immediately.
+        _time.sleep(0.3)
         os._exit(0)
 
         # Never reached
         return True, ""
 
     except Exception as exc:
-        return False, f"Failed to create updater script: {exc}"
+        return False, f"Installation failed: {exc}"
 
 
 def _install_linux(
