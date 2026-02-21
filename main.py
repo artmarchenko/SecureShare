@@ -44,6 +44,10 @@ logging.basicConfig(
 log = logging.getLogger("secureshare")
 log.info("Log file: %s", _LOG_FILE)
 
+# ── Crash reporting (install early, before any imports that could fail) ──
+from app.telemetry import install_crash_handler
+install_crash_handler()
+
 from app.gui import App
 
 

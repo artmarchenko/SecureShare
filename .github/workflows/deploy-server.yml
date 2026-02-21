@@ -1,0 +1,172 @@
+# ──────────────────────────────────────────────────────────────
+#  SecureShare Deploy Server — Relay & infrastructure only
+#
+#  Triggered by push to server config/code on main branch
+#  (excluding server/www/** which is handled by deploy-web.yml).
+#
+#  Order of operations (critical!):
+#    1. SCP all server files to VPS (new code must be there FIRST)
+#    2. Rebuild & restart only what changed:
+#       - relay_server.py / analytics.py / Dockerfile → rebuild relay
+#       - Caddyfile → reload Caddy (no rebuild needed)
+#       - docker-compose.yml → full docker compose up
+#
+#  Concurrency: only one deploy at a time to prevent race conditions.
+# ──────────────────────────────────────────────────────────────
+
+name: Deploy Server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/relay_server.py"
+      - "server/analytics.py"
+      - "server/requirements.txt"
+      - "server/Dockerfile"
+      - "server/docker-compose.yml"
+      - "server/Caddyfile"
+  workflow_dispatch:  # manual trigger for testing
+
+# Only one deploy at a time — prevent race conditions with deploy-web
+concurrency:
+  group: vps-deploy
+  cancel-in-progress: false  # queue, don't cancel
+
+jobs:
+  deploy-server:
+    name: Deploy Relay Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # need previous commit to detect what changed
+
+      - name: Detect what changed
+        id: changes
+        run: |
+          # Compare with previous commit
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- server/ 2>/dev/null || echo "server/")
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          echo "relay=false" >> $GITHUB_OUTPUT
+          echo "caddy=false" >> $GITHUB_OUTPUT
+          echo "compose=false" >> $GITHUB_OUTPUT
+
+          if echo "$CHANGED" | grep -qE "(relay_server|analytics|Dockerfile|requirements)"; then
+            echo "relay=true" >> $GITHUB_OUTPUT
+            echo "→ Relay container needs rebuild"
+          fi
+
+          if echo "$CHANGED" | grep -q "Caddyfile"; then
+            echo "caddy=true" >> $GITHUB_OUTPUT
+            echo "→ Caddy needs reload"
+          fi
+
+          if echo "$CHANGED" | grep -q "docker-compose"; then
+            echo "compose=true" >> $GITHUB_OUTPUT
+            echo "→ Full docker compose up needed"
+          fi
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      # ── Step 1: SCP files FIRST (before any rebuild) ──────────
+      - name: Upload server files to VPS
+        run: |
+          VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay"
+
+          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            server/relay_server.py \
+            server/analytics.py \
+            server/requirements.txt \
+            server/Dockerfile \
+            server/docker-compose.yml \
+            server/Caddyfile \
+            ${VPS}:${DEST}/
+
+          echo "✅ Server files uploaded"
+
+      # ── Step 2: Rebuild/restart only what's needed ────────────
+      - name: Rebuild relay container
+        if: steps.changes.outputs.relay == 'true' || steps.changes.outputs.compose == 'true'
+        run: |
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cd /home/\$(whoami)/secureshare-relay && \
+             docker compose up -d --build --no-deps relay && \
+             sleep 3 && \
+             docker compose ps relay"
+          echo "✅ Relay container rebuilt"
+
+      - name: Reload Caddy config
+        if: steps.changes.outputs.caddy == 'true'
+        run: |
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cd /home/\$(whoami)/secureshare-relay && \
+             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null \
+             || docker compose restart caddy"
+          echo "✅ Caddy config reloaded"
+
+      - name: Full docker compose up
+        if: steps.changes.outputs.compose == 'true'
+        run: |
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cd /home/\$(whoami)/secureshare-relay && \
+             docker compose up -d --remove-orphans && \
+             sleep 5 && \
+             docker compose ps"
+          echo "✅ Full docker compose up done"
+
+      # ── Step 3: Health checks ─────────────────────────────────
+      - name: Health check
+        run: |
+          echo "Waiting for services to stabilize..."
+          sleep 10
+
+          # Relay health
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            https://secureshare-relay.duckdns.org/health 2>/dev/null || echo "000")
+          echo "Relay health: HTTP $HEALTH"
+          if [ "$HEALTH" = "200" ]; then
+            echo "✅ Relay is healthy"
+          else
+            echo "❌ Relay health check failed: $HEALTH"
+            exit 1
+          fi
+
+          # Landing page (verify Caddy is working)
+          PAGE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            https://secureshare-relay.duckdns.org/ 2>/dev/null || echo "000")
+          echo "Landing page: HTTP $PAGE"
+          if [ "$PAGE" = "200" ]; then
+            echo "✅ Landing page OK"
+          else
+            echo "⚠️ Landing page: $PAGE"
+          fi
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/vps_key
+
+      - name: Deploy summary
+        run: |
+          echo "## Server Deploy ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Action |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Relay | ${{ steps.changes.outputs.relay == 'true' && 'Rebuilt ♻️' || 'Unchanged ✓' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Caddy | ${{ steps.changes.outputs.caddy == 'true' && 'Reloaded 🔄' || 'Unchanged ✓' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compose | ${{ steps.changes.outputs.compose == 'true' && 'Updated 📦' || 'Unchanged ✓' }} |" >> $GITHUB_STEP_SUMMARY
