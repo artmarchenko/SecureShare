@@ -176,80 +176,60 @@ class App(ctk.CTk):
     # ── UI construction ────────────────────────────────────────────
 
     def _build_ui(self):
-        # Title
+        # ── Title bar ─────────────────────────────────────────────
         title_frame = ctk.CTkFrame(self, fg_color="transparent")
-        title_frame.pack(fill="x", padx=20, pady=(12, 0))
+        title_frame.pack(fill="x", padx=20, pady=(14, 0))
+
         ctk.CTkLabel(
             title_frame,
             text=f"🔒 {APP_NAME}",
-            font=ctk.CTkFont(size=24, weight="bold"),
+            font=ctk.CTkFont(size=22, weight="bold"),
         ).pack(side="left")
+
         ctk.CTkLabel(
             title_frame,
             text=f"v{APP_VERSION}",
-            font=ctk.CTkFont(size=11),
-            text_color="gray",
-        ).pack(side="left", padx=(8, 0), pady=(6, 0))
+            font=ctk.CTkFont(size=10),
+            text_color="#777777",
+        ).pack(side="left", padx=(6, 0), pady=(5, 0))
 
-        # Help button (top-right)
-        ctk.CTkButton(
-            title_frame,
-            text="❓",
-            width=36,
-            height=30,
-            font=ctk.CTkFont(size=14),
-            fg_color="#3a3a3a",
-            hover_color="#4a4a4a",
-            border_width=1,
-            border_color="#555555",
-            corner_radius=8,
-            command=self._show_help,
-        ).pack(side="right")
+        # ── Toolbar ───────────────────────────────────────────────
+        toolbar = ctk.CTkFrame(self, fg_color="#1e1e1e", corner_radius=8, height=36)
+        toolbar.pack(fill="x", padx=20, pady=(8, 0))
+        toolbar.pack_propagate(False)
 
-        # Diagnostics button
-        ctk.CTkButton(
-            title_frame,
-            text="🔍",
-            width=36,
-            height=30,
-            font=ctk.CTkFont(size=14),
-            fg_color="#2c3e50",
-            hover_color="#34495e",
-            border_width=1,
-            border_color="#555555",
-            corner_radius=8,
-            command=self._run_diagnostics,
-        ).pack(side="right", padx=(0, 4))
+        _tb_font = ctk.CTkFont(size=12)
+        _tb_kw = dict(
+            height=28,
+            font=_tb_font,
+            fg_color="transparent",
+            hover_color="#333333",
+            border_width=0,
+            corner_radius=6,
+        )
 
-        # Donate button
         ctk.CTkButton(
-            title_frame,
-            text="❤️",
-            width=36,
-            height=30,
-            font=ctk.CTkFont(size=14),
-            fg_color="#8e2a4a",
-            hover_color="#a83262",
-            border_width=1,
-            border_color="#b44d6d",
-            corner_radius=8,
+            toolbar, text="🔄 Оновити", width=100,
+            command=self._check_updates_manual, **_tb_kw,
+        ).pack(side="left", padx=(6, 2), pady=4)
+
+        ctk.CTkButton(
+            toolbar, text="❤️ Підтримати", width=110,
             command=self._open_donate,
-        ).pack(side="right", padx=(0, 4))
+            height=28, font=_tb_font,
+            fg_color="#5c1a2a", hover_color="#7a2840",
+            border_width=0, corner_radius=6,
+        ).pack(side="left", padx=2, pady=4)
 
-        # Check for updates button
         ctk.CTkButton(
-            title_frame,
-            text="🔄",
-            width=36,
-            height=30,
-            font=ctk.CTkFont(size=14),
-            fg_color="#2c3e50",
-            hover_color="#34495e",
-            border_width=1,
-            border_color="#555555",
-            corner_radius=8,
-            command=self._check_updates_manual,
-        ).pack(side="right", padx=(0, 4))
+            toolbar, text="🔍 Діагностика", width=116,
+            command=self._run_diagnostics, **_tb_kw,
+        ).pack(side="left", padx=2, pady=4)
+
+        ctk.CTkButton(
+            toolbar, text="❓ Довідка", width=100,
+            command=self._show_help, **_tb_kw,
+        ).pack(side="left", padx=2, pady=4)
 
         # Tab view
         self.tabs = ctk.CTkTabview(self, width=self.WIDTH - 40)
@@ -339,7 +319,7 @@ class App(ctk.CTk):
         # Copyright footer
         ctk.CTkLabel(
             self,
-            text="© 2026 Artem Marchenko. All rights reserved.",
+            text="© 2026 Artem Marchenko. MIT License",
             font=ctk.CTkFont(size=10),
             text_color="gray",
         ).pack(pady=(0, 4))
@@ -923,7 +903,7 @@ class App(ctk.CTk):
             (
                 "🔑  Код верифікації",
                 "Після підключення обидва пристрої покажуть\n"
-                "однаковий 4-символьний код.\n\n"
+                "однаковий 8-символьний код (XXXX-XXXX).\n\n"
                 "✅ Коди збігаються → натисніть «Так»\n"
                 "❌ Коди різні → натисніть «Ні» і спробуйте ще раз\n\n"
                 "Це захищає від атак посередника (MITM).",
@@ -952,7 +932,7 @@ class App(ctk.CTk):
                 "🔄  Авто-реконнект і відновлення",
                 "При втраті з'єднання під час передачі\n"
                 "програма автоматично перепідключається\n"
-                "(до 3 спроб) і продовжує з місця зупинки.\n\n"
+                "(до 5 спроб: 5с, 10с, 20с, 40с, 60с) і продовжує з місця зупинки.\n\n"
                 "Верифікація при реконнекті пропускається —\n"
                 "програма пам'ятає сесію через токен.\n\n"
                 "Якщо реконнект не вдався:\n"
@@ -972,6 +952,30 @@ class App(ctk.CTk):
                 "•  Зупинити передачу → кнопка «Скасувати»",
                 "#1a2a2a",  # card bg
                 "#1abc9c",  # title color (teal)
+            ),
+            (
+                "🔄  Авто-оновлення",
+                "Програма автоматично перевіряє оновлення\n"
+                "при кожному запуску. Якщо є нова версія —\n"
+                "з'явиться діалог з описом змін.\n\n"
+                "•  🔄 Оновити зараз — завантажити та встановити\n"
+                "•  ⏩ Пропустити — ігнорувати цю версію\n"
+                "•  Пізніше — нагадати наступного разу\n\n"
+                "Оновлення перевіряється через SHA-256.\n"
+                "Кнопка 🔄 у шапці — перевірка вручну.",
+                "#1a2a2a",  # card bg
+                "#3498db",  # title color (blue)
+            ),
+            (
+                "❤️  Підтримка проєкту",
+                "SecureShare — безкоштовний open-source проєкт.\n"
+                "Розробка та сервер коштують грошей.\n\n"
+                "Кнопка ❤️ у шапці відкриває сторінку\n"
+                "підтримки на Ko-fi.\n\n"
+                "Навіть маленький донат допомагає тримати\n"
+                "relay-сервер онлайн та розвивати проєкт.",
+                "#2a1a2a",  # card bg
+                "#e91e63",  # title color (pink)
             ),
         ]
 

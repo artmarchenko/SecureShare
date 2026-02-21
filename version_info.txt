@@ -25,7 +25,7 @@ VSVersionInfo(
             StringStruct(u'FileDescription',  u'SecureShare — Secure File Transfer'),
             StringStruct(u'FileVersion',      u'3.3.1.0'),
             StringStruct(u'InternalName',     u'SecureShare'),
-            StringStruct(u'LegalCopyright',   u'Copyright \xa9 2026 Artem Marchenko. All rights reserved.'),
+            StringStruct(u'LegalCopyright',   u'Copyright \xa9 2026 Artem Marchenko. MIT License.'),
             StringStruct(u'OriginalFilename', u'SecureShare.exe'),
             StringStruct(u'ProductName',      u'SecureShare'),
             StringStruct(u'ProductVersion',   u'3.3.1.0'),
