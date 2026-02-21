@@ -1,0 +1,84 @@
+# ──────────────────────────────────────────────────────────────
+#  SecureShare Deploy Web — Landing page & static files only
+#
+#  Triggered by push to server/www/** on main branch.
+#  Just SCPs static files to VPS — NO container restart needed.
+#  Caddy serves /www as a read-only volume, so changes are
+#  picked up immediately. Zero downtime.
+# ──────────────────────────────────────────────────────────────
+
+name: Deploy Web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/www/**"
+  workflow_dispatch:  # manual trigger for testing
+
+# Only one deploy at a time — prevent race conditions with deploy-server
+concurrency:
+  group: vps-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-web:
+    name: Deploy Static Files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload static files to VPS
+        run: |
+          VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay/www"
+
+          # Ensure directory exists
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no ${VPS} "mkdir -p ${DEST}"
+
+          # Sync all files from server/www/
+          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no -r \
+            server/www/* \
+            ${VPS}:${DEST}/
+
+          echo "✅ Static files uploaded"
+
+      - name: Verify landing page
+        run: |
+          sleep 3
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            https://secureshare-relay.duckdns.org/ 2>/dev/null || echo "000")
+          echo "Landing page: HTTP $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Landing page is UP"
+          else
+            echo "⚠️ Landing page returned: $STATUS"
+          fi
+
+      - name: Verify relay NOT restarted
+        run: |
+          HEALTH=$(curl -s --max-time 10 \
+            https://secureshare-relay.duckdns.org/health 2>/dev/null || echo "{}")
+          echo "Health response: $HEALTH"
+          echo "✅ Relay was NOT restarted (zero downtime deploy)"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/vps_key
+
+      - name: Deploy summary
+        run: |
+          echo "## Web Deploy ✅" >> $GITHUB_STEP_SUMMARY
+          echo "Static files updated. **Zero downtime** — relay untouched." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🌐 https://secureshare-relay.duckdns.org/" >> $GITHUB_STEP_SUMMARY

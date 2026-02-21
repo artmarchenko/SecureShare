@@ -277,6 +277,77 @@
       padding: 18px 48px;
     }
 
+    /* ── Support / Donate ─────────────────────────── */
+    .support {
+      padding: 80px 0;
+      background: linear-gradient(135deg, #FFF8E1 0%, #FFF3E0 50%, #FFEBEE 100%);
+      text-align: center;
+    }
+    .support .section-title { color: #BF360C; }
+    .support-emoji {
+      font-size: 3.5rem;
+      margin-bottom: 16px;
+      display: block;
+      animation: pulse-heart 2s ease-in-out infinite;
+    }
+    @keyframes pulse-heart {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+    .support-text {
+      color: #5D4037;
+      font-size: 1.1rem;
+      max-width: 600px;
+      margin: 0 auto 12px;
+      line-height: 1.7;
+    }
+    .support-text strong { color: #BF360C; }
+    .support-details {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      flex-wrap: wrap;
+      margin: 32px 0;
+    }
+    .support-item {
+      background: rgba(255,255,255,.7);
+      border-radius: var(--radius);
+      padding: 20px 28px;
+      min-width: 180px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.06);
+      border: 1px solid rgba(191,54,12,.08);
+    }
+    .support-item-icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .support-item h4 { font-size: .95rem; font-weight: 600; color: #4E342E; margin-bottom: 4px; }
+    .support-item p { font-size: .85rem; color: #795548; }
+    .btn-donate {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 40px;
+      border-radius: 50px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: all .25s;
+      text-decoration: none;
+      background: linear-gradient(135deg, #FF6F00, #FF8F00);
+      color: var(--white);
+      box-shadow: 0 4px 20px rgba(255,111,0,.35);
+    }
+    .btn-donate:hover {
+      text-decoration: none;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 28px rgba(255,111,0,.45);
+    }
+    .btn-donate svg { width: 22px; height: 22px; }
+    .support-note {
+      margin-top: 20px;
+      font-size: .85rem;
+      color: #8D6E63;
+    }
+
     /* ── Footer ────────────────────────────────────── */
     footer {
       padding: 40px 0;
@@ -496,6 +567,46 @@
     </div>
   </section>
 
+  <!-- Support -->
+  <section class="support" id="support">
+    <div class="container">
+      <span class="support-emoji">☕</span>
+      <h2 class="section-title">Підтримайте проєкт</h2>
+      <p class="support-text">
+        SecureShare — це <strong>безкоштовний open-source проєкт</strong>, створений однією людиною у вільний час.
+        Сервер, домен і розробка коштують грошей, а мотивація — вашої підтримки.
+      </p>
+      <p class="support-text">
+        Кожна чашка кави допомагає тримати relay-сервер онлайн, покращувати безпеку
+        та додавати нові фічі. Навіть маленький донат — це сигнал, що проєкт потрібен&nbsp;людям&nbsp;💛
+      </p>
+      <div class="support-details">
+        <div class="support-item">
+          <div class="support-item-icon">🖥️</div>
+          <h4>Сервер</h4>
+          <p>Relay працює 24/7 для вас</p>
+        </div>
+        <div class="support-item">
+          <div class="support-item-icon">🔒</div>
+          <h4>Безпека</h4>
+          <p>Аудити, оновлення, патчі</p>
+        </div>
+        <div class="support-item">
+          <div class="support-item-icon">🚀</div>
+          <h4>Розвиток</h4>
+          <p>Нові платформи та фічі</p>
+        </div>
+      </div>
+      <a href="https://ko-fi.com/secureshare" class="btn-donate" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+        Пригостити кавою
+      </a>
+      <p class="support-note">
+        ⭐ Також можете поставити зірку на <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a> — це безкоштовно і дуже мотивує!
+      </p>
+    </div>
+  </section>
+
   <!-- Footer -->
   <footer>
     <div class="container">
@@ -504,8 +615,9 @@
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/USER_GUIDE.md" target="_blank" rel="noopener">Документація</a>
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/DEVELOPER.md" target="_blank" rel="noopener">Для розробників</a>
         <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener">Повідомити про баг</a>
+        <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener">☕ Підтримати</a>
       </div>
-      <p>SecureShare v3.2 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
+      <p>SecureShare v3.3 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
     </div>
   </footer>
 

@@ -9,11 +9,17 @@ services:
       - RELAY_MAX_CONN_PER_IP=50
       - RELAY_RATE_LIMIT=200
       - RELAY_ROOM_TIMEOUT=1800
+      - RELAY_DATA_DIR=/data
+      - RELAY_ADMIN_KEY=${RELAY_ADMIN_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - relay_data:/data
     networks:
       - web
     # Health check — Docker auto-restarts if unhealthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -24,7 +30,7 @@ services:
         limits:
           memory: 256m
           cpus: "0.5"
-    # Security hardening
+    # Security hardening — read_only except for /data
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -52,6 +58,7 @@ services:
           cpus: "0.25"
 
 volumes:
+  relay_data:
   caddy_data:
   caddy_config:
 

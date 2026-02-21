@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>SecureShare Admin</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d28;
+            --surface2: #242836;
+            --border: #2e3348;
+            --text: #e8eaf0;
+            --text2: #8b90a0;
+            --accent: #6c5ce7;
+            --accent2: #a29bfe;
+            --green: #00b894;
+            --red: #e17055;
+            --orange: #fdcb6e;
+            --blue: #74b9ff;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* Login screen */
+        #login-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .login-box {
+            background: var(--surface);
+            padding: 40px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        .login-box h1 { font-size: 1.5em; margin-bottom: 8px; }
+        .login-box p { color: var(--text2); margin-bottom: 24px; }
+        .login-box input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        .login-box input:focus { outline: none; border-color: var(--accent); }
+        .login-box button {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .login-box button:hover { background: var(--accent2); }
+        .login-error {
+            color: var(--red);
+            margin-top: 12px;
+            display: none;
+        }
+
+        /* Dashboard */
+        #dashboard { display: none; }
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 1.2em; }
+        .header-actions { display: flex; gap: 12px; align-items: center; }
+        .header-actions button {
+            padding: 8px 16px;
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .header-actions button:hover { background: var(--border); }
+        .btn-refresh { background: var(--accent) !important; border-color: var(--accent) !important; }
+        .btn-refresh:hover { background: var(--accent2) !important; }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-ok { background: var(--green); }
+        .status-err { background: var(--red); }
+
+        /* Cards grid */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            padding: 24px;
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .card-label { color: var(--text2); font-size: 13px; margin-bottom: 4px; }
+        .card-value { font-size: 2em; font-weight: 700; }
+        .card-sub { color: var(--text2); font-size: 12px; margin-top: 4px; }
+
+        /* Sections */
+        .section {
+            padding: 0 24px 24px;
+        }
+        .section h2 {
+            font-size: 1.1em;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+        .chart-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .chart-box h3 { font-size: 0.95em; margin-bottom: 12px; color: var(--text2); }
+        .chart-container { position: relative; height: 250px; }
+
+        /* Tables */
+        .table-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            color: var(--text2);
+            border-bottom: 1px solid var(--border);
+            font-weight: 500;
+        }
+        td {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        tr:last-child td { border: none; }
+        .mono { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-red { background: rgba(225, 112, 85, 0.2); color: var(--red); }
+        .badge-green { background: rgba(0, 184, 148, 0.2); color: var(--green); }
+        .badge-blue { background: rgba(116, 185, 255, 0.2); color: var(--blue); }
+
+        /* Downloads section */
+        .downloads {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .dl-btn {
+            padding: 10px 20px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 13px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .dl-btn:hover { background: var(--border); }
+        .dl-icon { font-size: 1.2em; }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text2);
+        }
+        .spinner {
+            display: inline-block;
+            width: 24px; height: 24px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Expand button */
+        .expand-btn {
+            color: var(--accent2);
+            cursor: pointer;
+            font-size: 12px;
+            background: none;
+            border: none;
+        }
+        .traceback {
+            display: none;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 11px;
+            background: var(--bg);
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Logout */
+        .btn-logout {
+            background: transparent !important;
+            color: var(--red) !important;
+            border-color: var(--red) !important;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="login-screen">
+    <div class="login-box">
+        <h1>🔐 SecureShare Admin</h1>
+        <p>Enter your admin API key to access the dashboard</p>
+        <input type="password" id="api-key-input" placeholder="Admin API Key" autocomplete="off">
+        <button id="login-btn">Sign In</button>
+        <div id="login-error" class="login-error">Invalid API key or server error</div>
+    </div>
+</div>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div id="dashboard">
+    <!-- Header -->
+    <div class="header">
+        <h1>
+            <span class="status-dot status-ok" id="status-dot"></span>
+            SecureShare Admin
+        </h1>
+        <div class="header-actions">
+            <span id="last-updated" style="color: var(--text2); font-size: 12px;"></span>
+            <button class="btn-refresh" id="refresh-btn">↻ Refresh</button>
+            <button class="btn-logout" id="logout-btn">Logout</button>
+        </div>
+    </div>
+
+    <!-- Overview Cards -->
+    <div class="cards" id="overview-cards">
+        <div class="card">
+            <div class="card-label">Uptime</div>
+            <div class="card-value" id="card-uptime">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Total Sessions</div>
+            <div class="card-value" id="card-sessions">—</div>
+            <div class="card-sub" id="card-sessions-sub"></div>
+        </div>
+        <div class="card">
+            <div class="card-label">Data Transferred</div>
+            <div class="card-value" id="card-bytes">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Success Rate</div>
+            <div class="card-value" id="card-success">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Connections</div>
+            <div class="card-value" id="card-connections">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Peak Rooms</div>
+            <div class="card-value" id="card-peak">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Rate Limits</div>
+            <div class="card-value" id="card-ratelimits">—</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Backpressure</div>
+            <div class="card-value" id="card-bp">—</div>
+        </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="section">
+        <h2>📊 Trends (last 48 hours)</h2>
+        <div class="grid-2">
+            <div class="chart-box">
+                <h3>Sessions per Hour</h3>
+                <div class="chart-container"><canvas id="chart-sessions"></canvas></div>
+            </div>
+            <div class="chart-box">
+                <h3>Data Transferred per Hour (MB)</h3>
+                <div class="chart-container"><canvas id="chart-bytes"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Distribution charts -->
+    <div class="section">
+        <h2>📈 Distributions</h2>
+        <div class="grid-2">
+            <div class="chart-box">
+                <h3>Transfer Size</h3>
+                <div class="chart-container"><canvas id="chart-sizes"></canvas></div>
+            </div>
+            <div class="chart-box">
+                <h3>Transfer Duration</h3>
+                <div class="chart-container"><canvas id="chart-duration"></canvas></div>
+            </div>
+            <div class="chart-box">
+                <h3>App Versions</h3>
+                <div class="chart-container"><canvas id="chart-versions"></canvas></div>
+            </div>
+            <div class="chart-box">
+                <h3>Operating Systems</h3>
+                <div class="chart-container"><canvas id="chart-os"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error types -->
+    <div class="section">
+        <h2>⚠️ Error Types</h2>
+        <div class="table-box">
+            <table id="error-table">
+                <thead><tr><th>Error Type</th><th>Count</th></tr></thead>
+                <tbody id="error-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Crashes -->
+    <div class="section">
+        <h2>💥 Recent Crashes</h2>
+        <div class="table-box">
+            <table id="crash-table">
+                <thead><tr>
+                    <th>Time</th><th>Error</th><th>Version</th><th>OS</th><th>Details</th>
+                </tr></thead>
+                <tbody id="crash-tbody"></tbody>
+            </table>
+            <div id="crash-empty" style="text-align:center; padding:20px; color:var(--text2)">
+                No crashes in last 48 hours ✅
+            </div>
+        </div>
+    </div>
+
+    <!-- Downloads -->
+    <div class="section">
+        <h2>📁 Download Logs</h2>
+        <div class="downloads" id="log-downloads">
+            <span style="color: var(--text2)">Loading file list...</span>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align: center; padding: 24px; color: var(--text2); font-size: 12px;">
+        SecureShare Relay Admin Dashboard &mdash; data is anonymous, no PII stored
+    </div>
+</div>
+
+<script>
+    /* ═══ State ═══ */
+    let API_KEY = '';
+    let charts = {};
+    let autoRefreshTimer = null;
+
+    /* ═══ Helpers ═══ */
+    function esc(s) {
+        /* Safely escape text to prevent XSS */
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function formatBytes(b) {
+        if (b < 1024) return b + ' B';
+        if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+        if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+        return (b / 1073741824).toFixed(2) + ' GB';
+    }
+
+    function formatUptime(h) {
+        if (h < 1) return Math.round(h * 60) + 'm';
+        if (h < 24) return h.toFixed(1) + 'h';
+        return (h / 24).toFixed(1) + 'd';
+    }
+
+    async function apiFetch(endpoint) {
+        const sep = endpoint.includes('?') ? '&' : '?';
+        const url = endpoint + sep + 'key=' + encodeURIComponent(API_KEY);
+        const r = await fetch(url);
+        if (r.status === 401 || r.status === 403) {
+            logout();
+            throw new Error('Unauthorized');
+        }
+        return r.json();
+    }
+
+    /* ═══ Login ═══ */
+    const loginScreen = document.getElementById('login-screen');
+    const dashboard = document.getElementById('dashboard');
+    const keyInput = document.getElementById('api-key-input');
+    const loginBtn = document.getElementById('login-btn');
+    const loginError = document.getElementById('login-error');
+
+    /* Try saved key */
+    (function() {
+        const saved = localStorage.getItem('ss_admin_key');
+        if (saved) {
+            API_KEY = saved;
+            tryLogin(true);
+        }
+    })();
+
+    loginBtn.addEventListener('click', () => tryLogin(false));
+    keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryLogin(false); });
+
+    async function tryLogin(silent) {
+        if (!silent) {
+            API_KEY = keyInput.value.trim();
+            if (!API_KEY) return;
+        }
+        try {
+            await apiFetch('/api/stats');
+            localStorage.setItem('ss_admin_key', API_KEY);
+            loginScreen.style.display = 'none';
+            dashboard.style.display = 'block';
+            loadAll();
+            /* Auto-refresh every 60 seconds */
+            autoRefreshTimer = setInterval(loadAll, 60000);
+        } catch (e) {
+            if (!silent) {
+                loginError.style.display = 'block';
+                loginError.textContent = 'Invalid API key or server error';
+            }
+            API_KEY = '';
+            localStorage.removeItem('ss_admin_key');
+        }
+    }
+
+    function logout() {
+        API_KEY = '';
+        localStorage.removeItem('ss_admin_key');
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        dashboard.style.display = 'none';
+        loginScreen.style.display = 'flex';
+        keyInput.value = '';
+        loginError.style.display = 'none';
+    }
+
+    document.getElementById('refresh-btn').addEventListener('click', loadAll);
+    document.getElementById('logout-btn').addEventListener('click', logout);
+
+    /* ═══ Load All Data ═══ */
+    async function loadAll() {
+        try {
+            const [stats, crashes, files] = await Promise.all([
+                apiFetch('/api/stats'),
+                apiFetch('/api/crashes?hours=48'),
+                apiFetch('/api/files'),
+            ]);
+            renderCards(stats);
+            renderHourlyCharts(stats.hourly);
+            renderDistCharts(stats.distributions);
+            renderErrors(stats.distributions.error_types);
+            renderCrashes(crashes);
+            renderFiles(files);
+            document.getElementById('last-updated').textContent =
+                'Updated: ' + new Date().toLocaleTimeString();
+            document.getElementById('status-dot').className = 'status-dot status-ok';
+        } catch (e) {
+            console.error('Load failed:', e);
+            document.getElementById('status-dot').className = 'status-dot status-err';
+        }
+    }
+
+    /* ═══ Render Cards ═══ */
+    function renderCards(stats) {
+        const lt = stats.lifetime;
+        document.getElementById('card-uptime').textContent = formatUptime(stats.uptime_hours);
+        document.getElementById('card-sessions').textContent = lt.sessions_completed.toLocaleString();
+        document.getElementById('card-sessions-sub').textContent =
+            `${lt.sessions_created} created · ${lt.sessions_paired} paired · ${lt.sessions_timeout} timeout`;
+        document.getElementById('card-bytes').textContent = formatBytes(lt.bytes_relayed);
+        document.getElementById('card-success').textContent = lt.success_rate_pct + '%';
+        document.getElementById('card-connections').textContent = lt.connections_total.toLocaleString();
+        document.getElementById('card-peak').textContent = lt.peak_concurrent_rooms;
+        document.getElementById('card-ratelimits').textContent = lt.rate_limit_hits.toLocaleString();
+        document.getElementById('card-bp').textContent = lt.backpressure_events.toLocaleString();
+
+        /* Color success rate */
+        const el = document.getElementById('card-success');
+        if (lt.success_rate_pct >= 90) el.style.color = 'var(--green)';
+        else if (lt.success_rate_pct >= 70) el.style.color = 'var(--orange)';
+        else el.style.color = 'var(--red)';
+    }
+
+    /* ═══ Hourly Charts ═══ */
+    const chartDefaults = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { color: '#8b90a0', maxTicksLimit: 12 }, grid: { color: '#2e3348' } },
+            y: { ticks: { color: '#8b90a0' }, grid: { color: '#2e3348' }, beginAtZero: true }
+        }
+    };
+
+    function renderHourlyCharts(hourly) {
+        const labels = Object.keys(hourly).map(k => k.slice(-5)); /* HH */
+        const sessions = Object.values(hourly).map(h => (h.sessions || 0));
+        const bytes = Object.values(hourly).map(h => ((h.bytes || 0) / 1048576).toFixed(1));
+
+        if (charts.sessions) charts.sessions.destroy();
+        charts.sessions = new Chart(document.getElementById('chart-sessions'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data: sessions,
+                    backgroundColor: 'rgba(108,92,231,0.6)',
+                    borderRadius: 4,
+                }]
+            },
+            options: chartDefaults
+        });
+
+        if (charts.bytes) charts.bytes.destroy();
+        charts.bytes = new Chart(document.getElementById('chart-bytes'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    data: bytes,
+                    borderColor: '#74b9ff',
+                    backgroundColor: 'rgba(116,185,255,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2,
+                }]
+            },
+            options: chartDefaults
+        });
+    }
+
+    /* ═══ Distribution Charts ═══ */
+    const pieColors = ['#6c5ce7','#a29bfe','#74b9ff','#00b894','#fdcb6e','#e17055','#d63031','#636e72'];
+
+    function makePie(canvasId, labels, data) {
+        const key = canvasId;
+        if (charts[key]) charts[key].destroy();
+        charts[key] = new Chart(document.getElementById(canvasId), {
+            type: 'doughnut',
+            data: {
+                labels,
+                datasets: [{
+                    data,
+                    backgroundColor: pieColors.slice(0, data.length),
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { color: '#8b90a0', font: { size: 11 } }
+                    }
+                }
+            }
+        });
+    }
+
+    function makeBar(canvasId, labels, data, color) {
+        const key = canvasId;
+        if (charts[key]) charts[key].destroy();
+        charts[key] = new Chart(document.getElementById(canvasId), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data,
+                    backgroundColor: color || 'rgba(108,92,231,0.6)',
+                    borderRadius: 4,
+                }]
+            },
+            options: chartDefaults
+        });
+    }
+
+    function renderDistCharts(dist) {
+        /* Transfer size */
+        const sizeOrder = ['<1MB','1-10MB','10-100MB','100-500MB','500MB-1GB','1GB+','2GB+'];
+        const sizeLabels = [], sizeData = [];
+        for (const k of sizeOrder) {
+            if (k in dist.transfer_size) {
+                sizeLabels.push(k);
+                sizeData.push(dist.transfer_size[k]);
+            }
+        }
+        /* Add any keys not in the predefined order */
+        for (const [k, v] of Object.entries(dist.transfer_size)) {
+            if (!sizeOrder.includes(k)) { sizeLabels.push(k); sizeData.push(v); }
+        }
+        makeBar('chart-sizes', sizeLabels, sizeData, 'rgba(0,184,148,0.6)');
+
+        /* Duration */
+        const durOrder = ['<10s','10-60s','1-5min','5-30min','30-60min','60min+'];
+        const durLabels = [], durData = [];
+        for (const k of durOrder) {
+            if (k in dist.transfer_duration) {
+                durLabels.push(k);
+                durData.push(dist.transfer_duration[k]);
+            }
+        }
+        for (const [k, v] of Object.entries(dist.transfer_duration)) {
+            if (!durOrder.includes(k)) { durLabels.push(k); durData.push(v); }
+        }
+        makeBar('chart-duration', durLabels, durData, 'rgba(253,203,110,0.6)');
+
+        /* Versions */
+        const vLabels = Object.keys(dist.app_versions);
+        const vData = Object.values(dist.app_versions);
+        makePie('chart-versions', vLabels.length ? vLabels : ['No data'], vData.length ? vData : [1]);
+
+        /* OS */
+        const oLabels = Object.keys(dist.os_types);
+        const oData = Object.values(dist.os_types);
+        makePie('chart-os', oLabels.length ? oLabels : ['No data'], oData.length ? oData : [1]);
+    }
+
+    /* ═══ Error Table ═══ */
+    function renderErrors(errors) {
+        const tbody = document.getElementById('error-tbody');
+        if (!errors || Object.keys(errors).length === 0) {
+            tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text2)">No errors recorded</td></tr>';
+            return;
+        }
+        tbody.innerHTML = '';
+        for (const [type, count] of Object.entries(errors)) {
+            const tr = document.createElement('tr');
+            const tdType = document.createElement('td');
+            tdType.className = 'mono';
+            tdType.textContent = type;
+            const tdCount = document.createElement('td');
+            tdCount.textContent = count;
+            tr.appendChild(tdType);
+            tr.appendChild(tdCount);
+            tbody.appendChild(tr);
+        }
+    }
+
+    /* ═══ Crash Table ═══ */
+    function renderCrashes(data) {
+        const tbody = document.getElementById('crash-tbody');
+        const empty = document.getElementById('crash-empty');
+
+        if (!data.groups || Object.keys(data.groups).length === 0) {
+            tbody.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        tbody.innerHTML = '';
+
+        for (const [errType, group] of Object.entries(data.groups)) {
+            const tr = document.createElement('tr');
+
+            const tdTime = document.createElement('td');
+            tdTime.textContent = group.latest ? group.latest.ts : '—';
+            tdTime.style.fontSize = '12px';
+
+            const tdErr = document.createElement('td');
+            const badge = document.createElement('span');
+            badge.className = 'badge badge-red';
+            badge.textContent = group.count + 'x';
+            tdErr.appendChild(badge);
+            tdErr.appendChild(document.createTextNode(' '));
+            const errSpan = document.createElement('span');
+            errSpan.className = 'mono';
+            errSpan.textContent = errType;
+            tdErr.appendChild(errSpan);
+
+            const tdVer = document.createElement('td');
+            tdVer.textContent = group.versions.join(', ');
+
+            const tdOs = document.createElement('td');
+            tdOs.textContent = group.os_types.join(', ');
+
+            const tdDetails = document.createElement('td');
+            if (group.latest && group.latest.traceback) {
+                const expandBtn = document.createElement('button');
+                expandBtn.className = 'expand-btn';
+                expandBtn.textContent = 'Show traceback';
+                const tb = document.createElement('div');
+                tb.className = 'traceback';
+                tb.textContent = group.latest.traceback;
+                expandBtn.addEventListener('click', () => {
+                    const visible = tb.style.display === 'block';
+                    tb.style.display = visible ? 'none' : 'block';
+                    expandBtn.textContent = visible ? 'Show traceback' : 'Hide';
+                });
+                tdDetails.appendChild(expandBtn);
+                tdDetails.appendChild(tb);
+            }
+
+            tr.appendChild(tdTime);
+            tr.appendChild(tdErr);
+            tr.appendChild(tdVer);
+            tr.appendChild(tdOs);
+            tr.appendChild(tdDetails);
+            tbody.appendChild(tr);
+        }
+    }
+
+    /* ═══ Files / Downloads ═══ */
+    function renderFiles(files) {
+        const container = document.getElementById('log-downloads');
+        container.innerHTML = '';
+
+        const all = [
+            ...(files.stats_files || []).map(f => ({name: f, type: 'stats'})),
+            ...(files.crash_files || []).map(f => ({name: f, type: 'crash'})),
+        ];
+
+        if (all.length === 0) {
+            container.innerHTML = '<span style="color:var(--text2)">No log files yet</span>';
+            return;
+        }
+
+        for (const f of all) {
+            const a = document.createElement('a');
+            a.className = 'dl-btn';
+            a.href = '/api/logs?file=' + encodeURIComponent(f.name) + '&key=' + encodeURIComponent(API_KEY);
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.innerHTML = '<span class="dl-icon">📄</span> ' + esc(f.name);
+            container.appendChild(a);
+        }
+    }
+</script>
+</body>
+</html>
