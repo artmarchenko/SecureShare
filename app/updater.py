@@ -302,7 +302,7 @@ def check_for_update(force: bool = False) -> Optional[ReleaseInfo]:
 
     if not is_newer(release.version, APP_VERSION):
         log.debug("Up to date: local=%s, remote=%s",
-                   APP_VERSION, release.version)
+                  APP_VERSION, release.version)
         return None
 
     if not force and is_version_skipped(release.version):

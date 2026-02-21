@@ -24,10 +24,9 @@ import platform
 import sys
 import traceback
 import threading
-import time
 import urllib.request
 import urllib.error
-from typing import Any, Optional
+from typing import Optional
 
 from app.config import APP_VERSION, VPS_RELAY_URL
 
@@ -144,8 +143,7 @@ def _send_async(url: str, data: dict) -> None:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-                pass  # We don't care about the response
+            urllib.request.urlopen(req, timeout=HTTP_TIMEOUT).close()
         except Exception:
             pass  # Fire and forget — never fail loudly
 
@@ -251,6 +249,7 @@ def _get_ram_mb() -> int:
         # Fallback for systems without psutil
         if sys.platform == "win32":
             import ctypes
+
             # GetProcessMemoryInfo
             class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
                 _fields_ = [
