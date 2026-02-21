@@ -26,12 +26,13 @@ from urllib.parse import urlparse
 
 import customtkinter as ctk
 
+import webbrowser
+
 from .config import (
     APP_NAME,
     APP_VERSION,
     DONATE_URL,
     GITHUB_URL,
-    HOMEPAGE_URL,
     SESSION_CODE_LENGTH,
     VPS_MAX_FILE_SIZE,
     VPS_RELAY_URL,
@@ -41,11 +42,7 @@ from .updater import (
     check_for_update, skip_version, clear_skipped, ReleaseInfo,
     can_auto_update, download_and_verify, install_and_restart,
 )
-from .telemetry import (
-    report_crash, report_session,
-    is_telemetry_enabled, set_telemetry_enabled,
-    is_crash_reporting_enabled, set_crash_reporting_enabled,
-)
+from .telemetry import report_crash, report_session
 
 log = logging.getLogger(__name__)
 
@@ -1057,8 +1054,9 @@ class App(ctk.CTk):
                         f"✅ У вас актуальна версія (v{APP_VERSION})"
                     ))
             except Exception as exc:
-                self.after(0, lambda: self._log(
-                    f"⚠️ Не вдалось перевірити оновлення: {exc}"
+                _err = str(exc)
+                self.after(0, lambda _e=_err: self._log(
+                    f"⚠️ Не вдалось перевірити оновлення: {_e}"
                 ))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -1241,8 +1239,9 @@ class App(ctk.CTk):
                     except SystemExit:
                         raise
                     except Exception as exc:
-                        win.after(0, lambda: update_status_label.configure(
-                            text=f"❌ Помилка: {exc}", text_color="#e74c3c",
+                        _err = str(exc)
+                        win.after(0, lambda _e=_err: update_status_label.configure(
+                            text=f"❌ Помилка: {_e}", text_color="#e74c3c",
                         ))
                         win.after(0, lambda: _enable_buttons())
 
