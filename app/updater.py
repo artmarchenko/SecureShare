@@ -517,9 +517,51 @@ def _get_current_exe() -> Optional[Path]:
     return None
 
 
+def _is_temp_or_archive_path(exe_path: Path) -> bool:
+    """Check if the exe is running from a temp/archive location.
+
+    When a user opens a .zip in Windows Explorer and runs the .exe
+    directly, Windows extracts it to %TEMP%\\Temp1_*.zip\\ — updating
+    there would lose the update after reboot.
+    """
+    path_str = str(exe_path).lower()
+    temp_dirs = [
+        os.environ.get("TEMP", "").lower(),
+        os.environ.get("TMP", "").lower(),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Temp").lower(),
+    ]
+    for td in temp_dirs:
+        if td and path_str.startswith(td):
+            return True
+    # Also check for .zip in the path (Windows virtual zip folder)
+    if ".zip" in path_str:
+        return True
+    return False
+
+
 def can_auto_update() -> bool:
     """Return True if auto-update is possible (running as frozen .exe)."""
-    return _get_current_exe() is not None
+    exe = _get_current_exe()
+    if exe is None:
+        return False
+    if _is_temp_or_archive_path(exe):
+        return False
+    return True
+
+
+def get_update_blocked_reason() -> Optional[str]:
+    """Return a user-friendly reason why auto-update is blocked, or None."""
+    exe = _get_current_exe()
+    if exe is None:
+        return None  # not frozen — button won't be shown anyway
+    if _is_temp_or_archive_path(exe):
+        return (
+            "Автооновлення недоступне: програма запущена з архіву "
+            "або тимчасової папки.\n\n"
+            "Розпакуйте SecureShare.zip в окрему папку і "
+            "запустіть звідти."
+        )
+    return None
 
 
 def download_and_verify(

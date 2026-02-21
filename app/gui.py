@@ -40,7 +40,8 @@ from .config import (
 from .ws_relay import VPSRelaySender, VPSRelayReceiver
 from .updater import (
     check_for_update, skip_version, clear_skipped, ReleaseInfo,
-    can_auto_update, download_and_verify, install_and_restart,
+    can_auto_update, download_and_verify, get_update_blocked_reason,
+    install_and_restart,
 )
 from .telemetry import report_crash, report_session
 
@@ -1213,6 +1214,7 @@ class App(ctk.CTk):
 
         # Auto-install button (only for frozen .exe builds)
         auto_update_btn = None
+        _blocked_reason = get_update_blocked_reason()
         if can_auto_update():
             def _auto_update():
                 """Download, verify, and install the update automatically."""
@@ -1297,6 +1299,15 @@ class App(ctk.CTk):
                 command=_auto_update,
             )
             auto_update_btn.pack(side="left", padx=(0, 6), fill="x", expand=True)
+
+        elif _blocked_reason:
+            # Running from archive/temp — show warning instead of update btn
+            ctk.CTkLabel(
+                btn_frame,
+                text="⚠️ Розпакуйте архів для автооновлення",
+                font=ctk.CTkFont(size=11),
+                text_color="#e67e22",
+            ).pack(side="left", padx=(0, 6))
 
         def _download():
             """Open the release page in the default browser."""

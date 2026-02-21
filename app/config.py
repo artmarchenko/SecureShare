@@ -29,7 +29,7 @@ RECONNECT_MAX_DELAY   = 60                # seconds cap
 
 # ── App ────────────────────────────────────────────────────────────
 APP_NAME = "SecureShare"
-APP_VERSION = "3.3.4"
+APP_VERSION = "3.3.5"
 
 # ── Links ──────────────────────────────────────────────────────────
 HOMEPAGE_URL = "https://secureshare-relay.duckdns.org"
