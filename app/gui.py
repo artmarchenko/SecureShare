@@ -1078,7 +1078,7 @@ class App(ctk.CTk):
 
         win = ctk.CTkToplevel(self)
         win.title(f"{APP_NAME} — Оновлення")
-        win.geometry("520x480")
+        win.geometry("540x580")
         win.resizable(True, True)
         win.transient(self)
         win.grab_set()
@@ -1093,8 +1093,8 @@ class App(ctk.CTk):
 
         # Center over parent
         win.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width() - 520) // 2
-        y = self.winfo_y() + (self.winfo_height() - 480) // 2
+        x = self.winfo_x() + (self.winfo_width() - 540) // 2
+        y = self.winfo_y() + (self.winfo_height() - 580) // 2
         win.geometry(f"+{max(0, x)}+{max(0, y)}")
 
         # ── Header ────────────────────────────────────────────────
@@ -1154,12 +1154,12 @@ class App(ctk.CTk):
 
         notes_box = ctk.CTkTextbox(
             win,
-            height=160,
+            height=140,
             font=ctk.CTkFont(size=12),
             wrap="word",
             fg_color="#1e1e1e",
         )
-        notes_box.pack(fill="both", expand=True, padx=20, pady=(2, 8))
+        notes_box.pack(fill="x", padx=20, pady=(2, 8))
 
         # Format release notes — strip markdown headers for readability
         body = release.body.strip() if release.body else "Немає опису."
