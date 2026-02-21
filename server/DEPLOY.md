@@ -102,7 +102,7 @@ sudo netfilter-persistent save
 
 1. Зайти на [duckdns.org](https://www.duckdns.org/)
 2. Залогінитись через GitHub/Google
-3. Створити піддомен, наприклад: `secureshare` → `secureshare.duckdns.org`
+3. Створити піддомен, наприклад: `secureshare-relay` → `secureshare-relay.duckdns.org`
 4. Вказати **Public IP** вашого Oracle VPS
 5. Натиснути **Update IP**
 
@@ -111,7 +111,7 @@ sudo netfilter-persistent save
 ```bash
 # Cron job для оновлення IP кожні 5 хвилин (якщо IP зміниться)
 mkdir -p ~/duckdns
-echo "url=\"https://www.duckdns.org/update?domains=secureshare&token=YOUR_TOKEN&ip=\"" > ~/duckdns/duck.sh
+echo "url=\"https://www.duckdns.org/update?domains=secureshare-relay&token=YOUR_TOKEN&ip=\"" > ~/duckdns/duck.sh
 chmod +x ~/duckdns/duck.sh
 (crontab -l 2>/dev/null; echo "*/5 * * * * ~/duckdns/duck.sh > ~/duckdns/duck.log 2>&1") | crontab -
 ```
@@ -120,21 +120,22 @@ chmod +x ~/duckdns/duck.sh
 
 ```bash
 # 1. Клонувати репо (або скопіювати файли)
-git clone <YOUR_REPO_URL> ~/secureshare
-cd ~/secureshare/server
+git clone https://github.com/artmarchenko/SecureShare.git ~/secureshare-relay
+cd ~/secureshare-relay
 
 # АБО якщо без git — скопіювати файли через scp (з локальної машини):
-# scp -i <key> -r server/* ubuntu@<PUBLIC_IP>:~/secureshare-server/
+# scp -i <key> -r server/* ubuntu@<PUBLIC_IP>:~/secureshare-relay/
 
 # 2. Налаштувати домен в Caddyfile
 nano Caddyfile
 ```
 
-Замінити `YOUR_DOMAIN` на свій домен:
+Замінити домен на свій (див. повний `Caddyfile` в репозиторії):
 
 ```
-secureshare.duckdns.org {
-    reverse_proxy relay:8765
+secureshare-relay.duckdns.org {
+    # Landing page, API proxy, WebSocket relay, downloads, admin
+    # See server/Caddyfile for full configuration
 }
 ```
 
@@ -151,7 +152,7 @@ docker compose logs -f
 ```
 relay-1  | 2026-02-19 12:00:00 [INFO] SecureShare Relay Server starting on 0.0.0.0:8765
 relay-1  | 2026-02-19 12:00:00 [INFO] Relay server ready. Waiting for connections...
-caddy-1  | ... certificate obtained for secureshare.duckdns.org ...
+caddy-1  | ... certificate obtained for secureshare-relay.duckdns.org ...
 ```
 
 ## Крок 8: Перевірити
@@ -160,11 +161,11 @@ caddy-1  | ... certificate obtained for secureshare.duckdns.org ...
 
 ```powershell
 # Перевірити що сервер відповідає
-curl https://secureshare.duckdns.org
-# Має повернути помилку WebSocket — це нормально, значить працює
+curl https://secureshare-relay.duckdns.org/health
+# Має повернути JSON з status: "ok"
 
-# Або Python:
-python -c "import websocket; ws=websocket.create_connection('wss://secureshare.duckdns.org'); ws.send('test'); print('OK'); ws.close()"
+# Перевірити лендінг:
+curl -s https://secureshare-relay.duckdns.org/ | head -5
 ```
 
 ## Крок 9: Безпека VPS
@@ -185,11 +186,18 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 
 ## Оновлення серверу
 
+Оновлення відбувається автоматично через **GitHub Actions**:
+- `deploy-server.yml` — при зміні серверного коду (relay, Caddyfile, Dockerfile)
+- `deploy-web.yml` — при зміні статичних файлів (landing page, admin)
+- `release.yml` — при створенні тегу `v*` (завантажує нові бінарники на VPS)
+
+Ручне оновлення (якщо потрібно):
+
 ```bash
 ssh -i <key> ubuntu@<PUBLIC_IP>
-cd ~/secureshare/server
-git pull
-docker compose up -d --build
+cd ~/secureshare-relay
+# Оновити файли вручну (scp або git pull)
+docker compose up -d --build --force-recreate relay
 # Готово за 30 секунд
 ```
 
