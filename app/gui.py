@@ -1165,8 +1165,27 @@ class App(ctk.CTk):
         )
         notes_box.pack(fill="x", padx=20, pady=(2, 8))
 
-        # Format release notes — strip markdown headers for readability
-        body = release.body.strip() if release.body else "Немає опису."
+        # Format release notes — extract Changes, strip commit hashes
+        body = release.body.strip() if release.body else ""
+        if body:
+            import re as _re
+            _m = _re.search(
+                r"###\s*Changes\s*\n(.*?)(?=\n###|\Z)",
+                body, _re.DOTALL,
+            )
+            if _m:
+                _lines = _m.group(1).strip().splitlines()
+                _clean = []
+                for _ln in _lines:
+                    _ln = _re.sub(
+                        r"^-\s+[0-9a-f]{7,}\s+", "\u2022 ", _ln.strip()
+                    )
+                    if _ln:
+                        _clean.append(_ln)
+                if _clean:
+                    body = "\n".join(_clean)
+        if not body:
+            body = "Немає опису."
         notes_box.insert("1.0", body)
         notes_box.configure(state="disabled")
 
