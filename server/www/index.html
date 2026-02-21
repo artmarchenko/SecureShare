@@ -277,6 +277,133 @@
       padding: 18px 48px;
     }
 
+    /* ── Changelog / Timeline ────────────────────── */
+    .changelog {
+      padding: 100px 0;
+      background: var(--white);
+    }
+    .timeline {
+      max-width: 720px;
+      margin: 60px auto 0;
+      position: relative;
+      padding-left: 40px;
+    }
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 15px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--blue), var(--green), var(--blue));
+      border-radius: 2px;
+    }
+    .tl-item {
+      position: relative;
+      padding-bottom: 36px;
+    }
+    .tl-item:last-child { padding-bottom: 0; }
+    .tl-dot {
+      position: absolute;
+      left: -33px;
+      top: 2px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 3px solid var(--blue);
+      background: var(--white);
+      z-index: 1;
+    }
+    .tl-item.major .tl-dot {
+      background: linear-gradient(135deg, var(--blue), var(--green));
+      border-color: transparent;
+      width: 22px;
+      height: 22px;
+      left: -35px;
+      top: 0;
+      box-shadow: 0 2px 12px rgba(21,101,192,.3);
+    }
+    .tl-item.latest .tl-dot {
+      background: linear-gradient(135deg, var(--green), #66BB6A);
+      border-color: transparent;
+      width: 24px;
+      height: 24px;
+      left: -36px;
+      top: -1px;
+      box-shadow: 0 2px 16px rgba(67,160,71,.4);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { box-shadow: 0 2px 16px rgba(67,160,71,.4); }
+      50% { box-shadow: 0 2px 24px rgba(67,160,71,.6); }
+    }
+    .tl-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .tl-version {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--dark);
+    }
+    .tl-date {
+      font-size: .8rem;
+      color: var(--gray);
+      background: var(--light);
+      padding: 2px 10px;
+      border-radius: 10px;
+    }
+    .tl-tag {
+      font-size: .7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      padding: 2px 10px;
+      border-radius: 10px;
+    }
+    .tl-tag.security { background: #FFF3E0; color: #E65100; }
+    .tl-tag.feature { background: #E8F5E9; color: #2E7D32; }
+    .tl-tag.release { background: #E3F2FD; color: #1565C0; }
+    .tl-changes {
+      list-style: none;
+      padding: 0;
+    }
+    .tl-changes li {
+      font-size: .92rem;
+      color: #4A5568;
+      padding: 3px 0;
+      padding-left: 20px;
+      position: relative;
+      line-height: 1.5;
+    }
+    .tl-changes li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      background: #CBD5E1;
+    }
+    .tl-changes li.feat::before { background: var(--green); }
+    .tl-changes li.sec::before { background: #FF6F00; border-radius: 50%; }
+    .tl-changes li.fix::before { background: var(--blue); border-radius: 50%; }
+    .tl-more {
+      margin-top: 32px;
+      text-align: center;
+    }
+    .tl-more a {
+      font-size: .9rem;
+      color: var(--blue);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     /* ── Support / Donate ─────────────────────────── */
     .support {
       padding: 80px 0;
@@ -567,6 +694,89 @@
     </div>
   </section>
 
+  <!-- Changelog -->
+  <section class="changelog" id="changelog">
+    <div class="container">
+      <h2 class="section-title">Історія розвитку</h2>
+      <p class="section-sub">Проєкт активно розвивається — кожна версія робить передачу файлів безпечнішою та зручнішою</p>
+      <div class="timeline">
+
+        <div class="tl-item latest">
+          <div class="tl-dot"></div>
+          <div class="tl-header">
+            <span class="tl-version">v3.3.1</span>
+            <span class="tl-date">Лютий 2026</span>
+            <span class="tl-tag security">Безпека</span>
+          </div>
+          <ul class="tl-changes">
+            <li class="sec">Комплексний аудит безпеки: 87 тестів, 6 виправлених вразливостей</li>
+            <li class="sec">Захист від IP-спуфінгу, CRLF-ін'єкцій, memory DoS</li>
+            <li class="sec">CVE-2026-26007 — оновлення криптографічних бібліотек</li>
+            <li class="feat">pip-audit в CI — автоматичний моніторинг CVE</li>
+            <li class="fix">Покращення UX: граматика, клікабельні посилання, діалог оновлення</li>
+          </ul>
+        </div>
+
+        <div class="tl-item major">
+          <div class="tl-dot"></div>
+          <div class="tl-header">
+            <span class="tl-version">v3.3.0</span>
+            <span class="tl-date">Лютий 2026</span>
+            <span class="tl-tag feature">Великий реліз</span>
+          </div>
+          <ul class="tl-changes">
+            <li class="feat">Автоматичне оновлення з перевіркою SHA-256 та цілісності</li>
+            <li class="feat">Анонімна телеметрія та crash-reporting</li>
+            <li class="feat">Адмін-дашборд з графіками та статистикою</li>
+            <li class="feat">Підтримка донатів через Ko-fi</li>
+            <li class="feat">Розділення CI/CD на 4 незалежні воркфлоу</li>
+            <li class="sec">MIT ліцензія — повністю відкритий код</li>
+          </ul>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-dot"></div>
+          <div class="tl-header">
+            <span class="tl-version">v3.2</span>
+            <span class="tl-date">Лютий 2026</span>
+            <span class="tl-tag feature">Фічі</span>
+          </div>
+          <ul class="tl-changes">
+            <li class="feat">Збірка для Linux — кросплатформенність</li>
+            <li class="feat">Авто-перепідключення при обриві зв'язку</li>
+            <li class="feat">Відновлення перерваних передач (resume)</li>
+            <li class="feat">Лендінг для relay-сервера</li>
+            <li class="fix">DNS retry — стабільніші з'єднання</li>
+          </ul>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-dot"></div>
+          <div class="tl-header">
+            <span class="tl-version">v3.0</span>
+            <span class="tl-date">Січень 2026</span>
+            <span class="tl-tag release">Перший реліз</span>
+          </div>
+          <ul class="tl-changes">
+            <li class="feat">E2E шифрування: X25519 + AES-256-GCM + SHA-256</li>
+            <li class="feat">VPS relay-сервер з Docker + Caddy + TLS 1.3</li>
+            <li class="feat">Зручний GUI з прогрес-баром та верифікацією</li>
+            <li class="feat">CI/CD: автоматична збірка, тести, деплой</li>
+            <li class="sec">Пентест та базове зміцнення безпеки</li>
+            <li class="feat">Документація для користувачів і розробників</li>
+          </ul>
+        </div>
+
+      </div>
+      <div class="tl-more">
+        <a href="https://github.com/artmarchenko/SecureShare/releases" target="_blank" rel="noopener">
+          Усі релізи на GitHub
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
+      </div>
+    </div>
+  </section>
+
   <!-- Support -->
   <section class="support" id="support">
     <div class="container">
@@ -614,6 +824,7 @@
         <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/USER_GUIDE.md" target="_blank" rel="noopener">Документація</a>
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/DEVELOPER.md" target="_blank" rel="noopener">Для розробників</a>
+        <a href="#changelog">Що нового</a>
         <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener">Повідомити про баг</a>
         <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener">☕ Підтримати</a>
       </div>
