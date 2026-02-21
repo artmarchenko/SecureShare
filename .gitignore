@@ -38,3 +38,4 @@ releases/
 # Local-only scripts & sensitive data
 sign.ps1
 server/VPS_INFO.md
+CREDENTIALS.md
