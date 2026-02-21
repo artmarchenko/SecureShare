@@ -5,125 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecureShare — Безпечна передача файлів</title>
   <meta name="description" content="Передавайте файли напряму між пристроями з наскрізним шифруванням. Без реєстрації, без хмарного зберігання, без слідів.">
-  <meta name="author" content="Artem Marchenko">
-  <meta name="robots" content="index, follow">
-  <meta name="theme-color" content="#0B1929">
-  <link rel="canonical" href="https://secureshare-relay.duckdns.org/">
-  <!-- Hreflang (multilingual single-page) -->
-  <link rel="alternate" hreflang="uk" href="https://secureshare-relay.duckdns.org/">
-  <link rel="alternate" hreflang="en" href="https://secureshare-relay.duckdns.org/">
-  <link rel="alternate" hreflang="de" href="https://secureshare-relay.duckdns.org/">
-  <link rel="alternate" hreflang="x-default" href="https://secureshare-relay.duckdns.org/">
-  <!-- Open Graph -->
   <meta property="og:title" content="SecureShare — Безпечна передача файлів">
   <meta property="og:description" content="E2E шифрування. Без реєстрації. Без хмари. До 5 ГБ.">
-  <meta property="og:image" content="https://secureshare-relay.duckdns.org/og-image.png">
-  <meta property="og:url" content="https://secureshare-relay.duckdns.org/">
+  <meta property="og:image" content="/og-image.png">
   <meta property="og:type" content="website">
-  <meta property="og:locale" content="uk_UA">
-  <meta property="og:locale:alternate" content="en_US">
-  <meta property="og:locale:alternate" content="de_DE">
-  <meta property="og:site_name" content="SecureShare">
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="SecureShare — Secure File Transfer">
-  <meta name="twitter:description" content="End-to-end encrypted file transfer. No registration, no cloud, no traces.">
-  <meta name="twitter:image" content="https://secureshare-relay.duckdns.org/og-image.png">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <!-- Performance hints -->
-  <link rel="preload" href="/logo.png" as="image">
-  <link rel="dns-prefetch" href="https://github.com">
-  <link rel="dns-prefetch" href="https://ko-fi.com">
-  <!-- Structured Data -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "SecureShare",
-    "applicationCategory": "UtilitiesApplication",
-    "operatingSystem": "Windows 10, Windows 11, Linux",
-    "description": "End-to-end encrypted peer-to-peer file transfer application. No registration, no cloud storage, no traces.",
-    "url": "https://secureshare-relay.duckdns.org/",
-    "downloadUrl": "https://secureshare-relay.duckdns.org/download/SecureShare.zip",
-    "softwareVersion": "3.4.0",
-    "author": {
-      "@type": "Person",
-      "name": "Artem Marchenko",
-      "url": "https://github.com/artmarchenko"
-    },
-    "license": "https://opensource.org/licenses/MIT",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    },
-    "featureList": [
-      "End-to-end encryption (AES-256-GCM)",
-      "No registration required",
-      "Up to 5 GB file transfer",
-      "Auto-reconnect and resume",
-      "Connection verification (MITM protection)",
-      "Zero-knowledge server",
-      "Open source (MIT license)"
-    ]
-  }
-  </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      {
-        "@type": "Question",
-        "name": "Are my files really encrypted?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. Every file is encrypted on the sender's device using AES-256-GCM with a unique key generated via X25519. The relay server only sees encrypted data and has no way to decrypt it."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "What is the maximum file size?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Up to 5 GB. Files are transferred in 256 KB chunks with interrupted transfer resumption — even if the connection drops, you don't need to start over."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Is registration required?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "No. Just download the app, choose a file, and share the session code with the recipient. No account, email, or phone needed."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "What is the verification code?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "After connecting, both participants see the same 8-character code. If the codes match — the connection is secure. This protects against man-in-the-middle (MITM) attacks."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Which operating systems are supported?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Windows 10/11 and Linux (x64). The app requires no installation — just download and run."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Are files stored on the server?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "No. The relay server only forwards encrypted packets between participants in real time. After the transfer is complete — zero traces. Session codes are hashed and not logged."
-        }
-      }
-    ]
-  }
-  </script>
   <style>
     /* ── Reset & Base ─────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -251,66 +137,6 @@
     .btn-secondary:hover { background: rgba(255,255,255,.15); }
     .hero-buttons { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
 
-    /* ── Sticky Nav ───────────────────────────────── */
-    .site-nav {
-      position: sticky;
-      top: 0;
-      z-index: 900;
-      background: rgba(255,255,255,.92);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(0,0,0,.06);
-      padding: 0;
-      transition: box-shadow .2s;
-    }
-    .site-nav.scrolled {
-      box-shadow: 0 2px 16px rgba(0,0,0,.08);
-    }
-    [data-theme="dark"] .site-nav {
-      background: rgba(15,18,24,.92);
-      border-bottom-color: rgba(255,255,255,.06);
-    }
-    [data-theme="dark"] .site-nav.scrolled {
-      box-shadow: 0 2px 16px rgba(0,0,0,.4);
-    }
-    .nav-inner {
-      display: flex;
-      justify-content: center;
-      gap: 8px;
-      overflow-x: auto;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-      padding: 0 8px;
-    }
-    .nav-inner::-webkit-scrollbar { display: none; }
-    .nav-inner a {
-      padding: 14px 16px;
-      font-size: .85rem;
-      font-weight: 500;
-      color: var(--gray);
-      white-space: nowrap;
-      text-decoration: none;
-      transition: color .2s;
-      border-bottom: 2px solid transparent;
-    }
-    .nav-inner a:hover {
-      color: var(--blue);
-      text-decoration: none;
-    }
-    .nav-inner a.active {
-      color: var(--blue);
-      border-bottom-color: var(--blue);
-      font-weight: 600;
-    }
-    [data-theme="dark"] .nav-inner a { color: #94A3B8; }
-    [data-theme="dark"] .nav-inner a:hover,
-    [data-theme="dark"] .nav-inner a.active { color: #64B5F6; border-bottom-color: #64B5F6; }
-
-    @media (max-width: 768px) {
-      .nav-inner { gap: 0; }
-      .nav-inner a { padding: 12px 10px; font-size: .78rem; }
-    }
-
     /* ── Features ──────────────────────────────────── */
     .features {
       padding: 100px 0;
@@ -400,167 +226,6 @@
       font-size: 1.4rem;
     }
 
-    /* ── App Preview / Gallery Carousel ─────────────── */
-    .app-preview {
-      padding: 100px 0;
-      background: linear-gradient(135deg, #0B1929 0%, #1a2d45 50%, #132F4C 100%);
-      color: var(--white);
-      overflow: hidden;
-    }
-    .app-preview .section-title { color: var(--white); }
-    .app-preview .section-sub { color: rgba(255,255,255,.6); }
-
-    .gallery-wrap {
-      position: relative;
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-
-    .gallery-track {
-      display: flex;
-      overflow-x: auto;
-      scroll-snap-type: x mandatory;
-      -webkit-overflow-scrolling: touch;
-      scroll-behavior: smooth;
-      gap: 24px;
-      padding: 20px 40px 28px;
-      /* hide scrollbar */
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-    }
-    .gallery-track::-webkit-scrollbar { display: none; }
-
-    .gallery-card {
-      flex: 0 0 340px;
-      scroll-snap-align: center;
-      background: rgba(255,255,255,.05);
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 20px;
-      overflow: hidden;
-      transition: transform .35s, box-shadow .35s;
-      position: relative;
-    }
-    .gallery-card:hover {
-      transform: translateY(-8px);
-      box-shadow: 0 20px 60px rgba(0,0,0,.5);
-    }
-    .gallery-card img {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
-    .gallery-card .gc-badge {
-      position: absolute;
-      top: 14px;
-      left: 14px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px 6px 8px;
-      border-radius: 20px;
-      background: rgba(0,0,0,.55);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,.12);
-      z-index: 2;
-    }
-    .gc-badge .gc-num {
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, var(--blue), var(--blue-d));
-      color: var(--white);
-      font-size: .8rem;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .gc-badge .gc-label {
-      font-size: .82rem;
-      font-weight: 600;
-      color: rgba(255,255,255,.9);
-    }
-    .gallery-card .gc-caption {
-      padding: 18px 20px;
-      background: linear-gradient(to top, rgba(0,0,0,.5), rgba(0,0,0,.15));
-    }
-    .gc-caption h4 {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--white);
-      margin: 0 0 4px;
-    }
-    .gc-caption p {
-      font-size: .88rem;
-      color: rgba(255,255,255,.55);
-      margin: 0;
-      line-height: 1.5;
-    }
-
-    /* navigation arrows */
-    .gallery-nav {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-70%);
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: rgba(255,255,255,.1);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid rgba(255,255,255,.15);
-      color: var(--white);
-      font-size: 1.4rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all .2s;
-      z-index: 3;
-    }
-    .gallery-nav:hover {
-      background: rgba(255,255,255,.2);
-      transform: translateY(-70%) scale(1.1);
-    }
-    .gallery-prev { left: -8px; }
-    .gallery-next { right: -8px; }
-    .gallery-nav svg { width: 22px; height: 22px; }
-
-    /* dot indicators */
-    .gallery-dots {
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      margin-top: 8px;
-    }
-    .gallery-dots .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: rgba(255,255,255,.2);
-      border: none;
-      cursor: pointer;
-      transition: all .25s;
-      padding: 0;
-    }
-    .gallery-dots .dot.active {
-      background: var(--blue);
-      box-shadow: 0 0 10px rgba(21,101,192,.6);
-      transform: scale(1.2);
-    }
-    .gallery-dots .dot:hover:not(.active) {
-      background: rgba(255,255,255,.4);
-    }
-
-    @media (max-width: 768px) {
-      .app-preview { padding: 60px 0; }
-      .gallery-card { flex: 0 0 290px; }
-      .gallery-track { gap: 16px; padding: 16px 24px 24px; }
-      .gallery-nav { display: none; }
-      .gallery-wrap { margin: 0 -24px; }
-    }
-
     /* ── Security ──────────────────────────────────── */
     .security {
       padding: 100px 0;
@@ -610,72 +275,6 @@
     .cta .btn-primary {
       font-size: 1.2rem;
       padding: 18px 48px;
-    }
-
-    /* ── FAQ ─────────────────────────────────────── */
-    .faq { padding: 100px 0; background: var(--light); }
-    .faq-list {
-      max-width: 760px;
-      margin: 0 auto;
-    }
-    .faq-item {
-      background: var(--white);
-      border-radius: var(--radius);
-      margin-bottom: 12px;
-      box-shadow: 0 2px 12px rgba(0,0,0,.04);
-      border: 1px solid rgba(0,0,0,.05);
-      overflow: hidden;
-    }
-    .faq-q {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 20px 24px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      text-align: left;
-      font-size: 1.05rem;
-      font-weight: 600;
-      color: var(--dark);
-      font-family: inherit;
-      line-height: 1.5;
-      transition: color .2s;
-    }
-    .faq-q:hover { color: var(--blue); }
-    .faq-q .faq-chevron {
-      width: 20px;
-      height: 20px;
-      flex-shrink: 0;
-      margin-left: 16px;
-      color: var(--gray);
-      transition: transform .3s;
-    }
-    .faq-item.open .faq-q .faq-chevron {
-      transform: rotate(180deg);
-    }
-    .faq-a {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height .35s ease, padding .35s ease;
-      padding: 0 24px;
-    }
-    .faq-item.open .faq-a {
-      max-height: 300px;
-      padding: 0 24px 20px;
-    }
-    .faq-a p {
-      font-size: .95rem;
-      color: var(--gray);
-      line-height: 1.7;
-    }
-
-    @media (max-width: 768px) {
-      .faq { padding: 60px 0; }
-      .faq-q { padding: 16px 18px; font-size: .95rem; }
-      .faq-a { padding: 0 18px; }
-      .faq-item.open .faq-a { padding: 0 18px 16px; }
     }
 
     /* ── Changelog / Timeline ────────────────────── */
@@ -893,112 +492,6 @@
       flex-wrap: wrap;
     }
 
-    /* ── Dark Theme ───────────────────────────────── */
-    [data-theme="dark"] {
-      --light: #111827;
-      --white: #1a1f2e;
-      --dark:  #E2E8F0;
-      --gray:  #94A3B8;
-    }
-    [data-theme="dark"] body { background: #0f1218; color: #E2E8F0; }
-    [data-theme="dark"] .features { background: #111827; }
-    [data-theme="dark"] .feature-card {
-      background: #1e2536;
-      border-color: rgba(255,255,255,.06);
-      box-shadow: 0 4px 24px rgba(0,0,0,.3);
-    }
-    [data-theme="dark"] .feature-card:hover { box-shadow: 0 8px 32px rgba(0,0,0,.5); }
-    [data-theme="dark"] .feature-card h3 { color: #E2E8F0; }
-    [data-theme="dark"] .how-it-works { background: #0f1218; }
-    [data-theme="dark"] .step h3 { color: #E2E8F0; }
-    [data-theme="dark"] .faq { background: #111827; }
-    [data-theme="dark"] .faq-item {
-      background: #1e2536;
-      border-color: rgba(255,255,255,.06);
-    }
-    [data-theme="dark"] .faq-q { color: #E2E8F0; }
-    [data-theme="dark"] .faq-q:hover { color: #64B5F6; }
-    [data-theme="dark"] .cta {
-      background: linear-gradient(135deg, #1a2744 0%, #1e3a28 100%);
-    }
-    [data-theme="dark"] .cta h2 { color: #E2E8F0; }
-    [data-theme="dark"] .cta p { color: #94A3B8; }
-    [data-theme="dark"] .changelog { background: #0f1218; }
-    [data-theme="dark"] .tl-version { color: #E2E8F0; }
-    [data-theme="dark"] .tl-date { background: #1e2536; color: #94A3B8; }
-    [data-theme="dark"] .tl-changes li { color: #94A3B8; }
-    [data-theme="dark"] .tl-changes li::before { opacity: .8; }
-    [data-theme="dark"] .tl-dot { background: #1e2536; border-color: #3B82F6; }
-    [data-theme="dark"] .timeline::before { opacity: .5; }
-    [data-theme="dark"] .support {
-      background: linear-gradient(135deg, #2a1f0e 0%, #2a1a0e 50%, #2a0e14 100%);
-    }
-    [data-theme="dark"] .support .section-title { color: #FF8A65; }
-    [data-theme="dark"] .support-text { color: #D7CCC8; }
-    [data-theme="dark"] .support-text strong { color: #FF8A65; }
-    [data-theme="dark"] .support-item {
-      background: rgba(0,0,0,.3);
-      border-color: rgba(191,54,12,.15);
-    }
-    [data-theme="dark"] .support-item h4 { color: #D7CCC8; }
-    [data-theme="dark"] .support-item p { color: #A1887F; }
-    [data-theme="dark"] .support-note { color: #A1887F; }
-    [data-theme="dark"] footer {
-      border-top-color: #1e2536;
-      color: #64748B;
-    }
-
-    /* ── Theme Toggle Button ────────────────────── */
-    .theme-toggle {
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      z-index: 1000;
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: rgba(11,25,41,.92);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255,255,255,.15);
-      color: rgba(255,255,255,.7);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 20px rgba(0,0,0,.3);
-      transition: all .25s;
-    }
-    .theme-toggle:hover {
-      color: var(--white);
-      background: rgba(11,25,41,.98);
-      transform: scale(1.1);
-    }
-    .theme-toggle svg { width: 20px; height: 20px; }
-
-    @media (max-width: 768px) {
-      .theme-toggle { top: 12px; left: 12px; width: 38px; height: 38px; }
-      .theme-toggle svg { width: 17px; height: 17px; }
-    }
-
-    /* ── Skip Link (a11y) ─────────────────────────── */
-    .skip-link {
-      position: absolute;
-      top: -100px;
-      left: 16px;
-      z-index: 10000;
-      background: var(--blue);
-      color: var(--white);
-      padding: 12px 24px;
-      border-radius: 0 0 8px 8px;
-      font-weight: 600;
-      transition: top .2s;
-    }
-    .skip-link:focus {
-      top: 0;
-      text-decoration: none;
-    }
-
     /* ── Language Toggle ──────────────────────────── */
     .lang-toggle {
       position: fixed;
@@ -1040,107 +533,28 @@
 
     /* ── Responsive ────────────────────────────────── */
     @media (max-width: 768px) {
-      .container { padding: 0 16px; }
-      .hero { padding: 50px 0 60px; }
+      .hero { padding: 60px 0 80px; }
       .hero-logo { width: 80px; height: 80px; }
-      .hero h1 { margin-bottom: 12px; }
-      .hero p { margin-bottom: 28px; }
-      .hero-badges { gap: 8px; margin-bottom: 28px; }
-      .badge { padding: 5px 10px; font-size: .78rem; }
-      .btn { padding: 14px 24px; font-size: 1rem; }
-      .hero-buttons { gap: 10px; }
       .steps { flex-direction: column; gap: 32px; }
       .step-arrow { display: none; }
-      .features, .how-it-works, .security, .changelog { padding: 60px 0; }
-      .cta { padding: 50px 0; }
-      .cta .btn-primary { font-size: 1rem; padding: 14px 32px; }
-      .section-title { margin-bottom: 8px; }
-      .section-sub { font-size: 1rem; margin-bottom: 40px; }
-      .features-grid { grid-template-columns: 1fr; gap: 16px; }
-      .feature-card { padding: 24px 20px; }
-      .security-grid { grid-template-columns: 1fr; gap: 16px; }
-      .sec-item { padding: 20px 18px; }
-      .timeline { padding-left: 32px; margin-top: 40px; }
-      .timeline::before { left: 11px; }
-      .tl-dot { left: -28px; }
-      .tl-item.major .tl-dot { left: -30px; }
-      .tl-item.latest .tl-dot { left: -31px; }
-      .tl-header { gap: 8px; }
-      .tl-version { font-size: 1rem; }
-      .tl-changes li { font-size: .85rem; }
-      .support { padding: 50px 0; }
-      .support-emoji { font-size: 2.8rem; }
-      .support-text { font-size: 1rem; }
-      .support-details { gap: 16px; }
-      .support-item { min-width: 140px; padding: 16px 18px; }
-      .btn-donate { padding: 14px 32px; font-size: 1.05rem; }
-      .footer-links { gap: 16px; font-size: .85rem; }
-      footer p { font-size: .8rem; }
+      .features, .how-it-works, .security { padding: 60px 0; }
       .lang-toggle { top: 12px; right: 12px; }
       .lang-btn { padding: 5px 10px; font-size: .78rem; }
-    }
-
-    /* ── Scroll Animations ────────────────────────── */
-    .fade-up {
-      opacity: 0;
-      transform: translateY(30px);
-      transition: opacity .6s ease, transform .6s ease;
-    }
-    .fade-up.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .fade-up:nth-child(2) { transition-delay: .1s; }
-    .fade-up:nth-child(3) { transition-delay: .2s; }
-    .fade-up:nth-child(4) { transition-delay: .3s; }
-    .fade-up:nth-child(5) { transition-delay: .15s; }
-    .fade-up:nth-child(6) { transition-delay: .25s; }
-
-    @media (prefers-reduced-motion: reduce) {
-      .fade-up { opacity: 1; transform: none; transition: none; }
-    }
-
-    /* ── Extra small screens ─────────────────────── */
-    @media (max-width: 400px) {
-      .container { padding: 0 12px; }
-      .hero { padding: 40px 0 50px; }
-      .hero-logo { width: 64px; height: 64px; margin-bottom: 16px; }
-      .btn { padding: 12px 20px; font-size: .92rem; gap: 8px; }
-      .btn svg { width: 18px; height: 18px; }
-      .hero-buttons { flex-direction: column; align-items: center; gap: 8px; }
-      .hero-buttons .btn { width: 100%; justify-content: center; }
-      .badge { font-size: .72rem; padding: 4px 8px; }
-      .feature-card { padding: 20px 16px; }
-      .support-details { flex-direction: column; align-items: center; }
-      .support-item { width: 100%; }
-      .footer-links { flex-direction: column; gap: 10px; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Theme Toggle -->
-  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle dark mode">
-    <!-- Sun (shown in dark mode) -->
-    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-    <!-- Moon (shown in light mode) -->
-    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-  </button>
-
-  <!-- Skip to content (a11y) -->
-  <a href="#features" class="skip-link">Skip to content</a>
-
   <!-- Language Toggle -->
-  <div class="lang-toggle" id="langToggle" role="group" aria-label="Language selection">
+  <div class="lang-toggle" id="langToggle">
     <button class="lang-btn active" data-lang="uk" id="btnUk" type="button">UA</button>
     <button class="lang-btn" data-lang="en" id="btnEn" type="button">EN</button>
-    <button class="lang-btn" data-lang="de" id="btnDe" type="button">DE</button>
   </div>
 
   <!-- Hero -->
-  <section class="hero" role="banner">
+  <section class="hero">
     <div class="container hero-content">
-      <img src="/logo.png" alt="SecureShare" class="hero-logo" width="120" height="120" fetchpriority="high">
+      <img src="/logo.png" alt="SecureShare" class="hero-logo" width="120" height="120">
       <h1>Secure<span>Share</span></h1>
       <p data-i18n="hero_subtitle">Передавайте файли напряму між пристроями з наскрізним шифруванням. Без реєстрації, без хмари, без слідів.</p>
       <div class="hero-badges">
@@ -1178,61 +592,48 @@
     </div>
   </section>
 
-  <!-- Sticky Navigation (SEO + UX) -->
-  <nav class="site-nav" id="siteNav" aria-label="Main navigation">
-    <div class="container nav-inner">
-      <a href="#features" data-i18n="nav_features">Можливості</a>
-      <a href="#how" data-i18n="nav_how">Як працює</a>
-      <a href="#preview" data-i18n="nav_preview">Демо</a>
-      <a href="#security" data-i18n="nav_security">Безпека</a>
-      <a href="#faq" data-i18n="nav_faq">FAQ</a>
-      <a href="#changelog" data-i18n="nav_changelog">Версії</a>
-      <a href="#support" data-i18n="nav_support">Підтримка</a>
-    </div>
-  </nav>
-
   <!-- Features -->
   <section class="features" id="features">
     <div class="container">
       <h2 class="section-title" data-i18n="features_title">Чому SecureShare?</h2>
       <p class="section-sub" data-i18n="features_sub">Створено для тих, хто цінує приватність та простоту</p>
       <div class="features-grid">
-        <div class="feature-card fade-up">
+        <div class="feature-card">
           <div class="feature-icon blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
           </div>
           <h3 data-i18n="feat_e2e_title">Наскрізне шифрування</h3>
           <p data-i18n="feat_e2e_desc">X25519 обмін ключами + AES-256-GCM. Сервер бачить лише шифротекст — ніколи ваші дані.</p>
         </div>
-        <div class="feature-card fade-up">
+        <div class="feature-card">
           <div class="feature-icon green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" y1="11" x2="23" y2="11"/></svg>
           </div>
           <h3 data-i18n="feat_noreg_title">Без реєстрації</h3>
           <p data-i18n="feat_noreg_desc">Не потрібен акаунт, email чи телефон. Просто відкрийте програму та поділіться кодом сесії.</p>
         </div>
-        <div class="feature-card fade-up">
+        <div class="feature-card">
           <div class="feature-icon blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
           </div>
           <h3 data-i18n="feat_5gb_title">До 5 ГБ</h3>
           <p data-i18n="feat_5gb_desc">Передавайте великі файли без обмежень хмарних сервісів. Відновлення перерваних передач включено.</p>
         </div>
-        <div class="feature-card fade-up">
+        <div class="feature-card">
           <div class="feature-icon green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           </div>
           <h3 data-i18n="feat_reconnect_title">Авто-перепідключення</h3>
           <p data-i18n="feat_reconnect_desc">Обірвався зв'язок? Програма автоматично перепідключиться та продовжить з місця зупинки.</p>
         </div>
-        <div class="feature-card fade-up">
+        <div class="feature-card">
           <div class="feature-icon blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
           </div>
           <h3 data-i18n="feat_verify_title">Верифікація</h3>
           <p data-i18n="feat_verify_desc">Код верифікації гарантує, що ви спілкуєтесь саме з потрібною людиною. Захист від MITM-атак.</p>
         </div>
-        <div class="feature-card fade-up">
+        <div class="feature-card">
           <div class="feature-icon green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           </div>
@@ -1249,90 +650,23 @@
       <h2 class="section-title" data-i18n="how_title">Як це працює?</h2>
       <p class="section-sub" data-i18n="how_sub">Три прості кроки — і файл у безпеці</p>
       <div class="steps">
-        <div class="step fade-up">
+        <div class="step">
           <div class="step-num">1</div>
           <h3 data-i18n="step1_title">Відправник створює сесію</h3>
           <p data-i18n="step1_desc">Натисніть «Надіслати», оберіть файл. Програма генерує унікальний код сесії з 8 символів.</p>
           <span class="step-arrow">&#10230;</span>
         </div>
-        <div class="step fade-up">
+        <div class="step">
           <div class="step-num">2</div>
           <h3 data-i18n="step2_title">Отримувач підключається</h3>
           <p data-i18n="step2_desc">Введіть код у себе в програмі. Обидва пристрої обмінюються ключами та верифікують з'єднання.</p>
           <span class="step-arrow">&#10230;</span>
         </div>
-        <div class="step fade-up">
+        <div class="step">
           <div class="step-num">3</div>
           <h3 data-i18n="step3_title">Файл передається</h3>
           <p data-i18n="step3_desc">Дані шифруються на пристрої відправника та розшифровуються тільки у отримувача. Сервер бачить лише шум.</p>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- App Preview / Gallery -->
-  <section class="app-preview" id="preview">
-    <div class="container">
-      <h2 class="section-title" data-i18n="preview_title">Подивіться в дії</h2>
-      <p class="section-sub" data-i18n="preview_sub">Так виглядає безпечна передача файлу від початку до кінця</p>
-    </div>
-    <div class="gallery-wrap">
-      <!-- nav arrows -->
-      <button class="gallery-nav gallery-prev" id="galPrev" type="button" aria-label="Previous">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-      </button>
-      <button class="gallery-nav gallery-next" id="galNext" type="button" aria-label="Next">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-      </button>
-
-      <div class="gallery-track" id="galTrack">
-        <!-- 1. Connect -->
-        <div class="gallery-card">
-          <div class="gc-badge"><span class="gc-num">1</span><span class="gc-label" data-i18n="preview_cap1_title">Підключення</span></div>
-          <img src="/img/screen-connect.jpg" alt="SecureShare — Connection" loading="lazy" width="680" height="460">
-          <div class="gc-caption">
-            <h4 data-i18n="preview_cap1_title">Підключення</h4>
-            <p data-i18n="preview_cap1_desc">Обмін ключами та верифікація з'єднання</p>
-          </div>
-        </div>
-
-        <!-- 2. Verify -->
-        <div class="gallery-card">
-          <div class="gc-badge"><span class="gc-num">2</span><span class="gc-label" data-i18n="preview_cap2_title">Верифікація</span></div>
-          <img src="/img/screen-verify.jpg" alt="SecureShare — Verification" loading="lazy" width="680" height="460">
-          <div class="gc-caption">
-            <h4 data-i18n="preview_cap2_title">Верифікація</h4>
-            <p data-i18n="preview_cap2_desc">Код безпеки захищає від MITM-атак</p>
-          </div>
-        </div>
-
-        <!-- 3. Send -->
-        <div class="gallery-card">
-          <div class="gc-badge"><span class="gc-num">3</span><span class="gc-label" data-i18n="preview_cap3_title">Відправка</span></div>
-          <img src="/img/screen-send.jpg" alt="SecureShare — Sending" loading="lazy" width="680" height="460">
-          <div class="gc-caption">
-            <h4 data-i18n="preview_cap3_title">Відправка</h4>
-            <p data-i18n="preview_cap3_desc">E2E-шифрування в реальному часі, 15+ МБ/с</p>
-          </div>
-        </div>
-
-        <!-- 4. Receive -->
-        <div class="gallery-card">
-          <div class="gc-badge"><span class="gc-num">4</span><span class="gc-label" data-i18n="preview_cap4_title">Отримання</span></div>
-          <img src="/img/screen-receive.jpg" alt="SecureShare — Receiving" loading="lazy" width="680" height="460">
-          <div class="gc-caption">
-            <h4 data-i18n="preview_cap4_title">Отримання</h4>
-            <p data-i18n="preview_cap4_desc">Автоматична розшифровка та перевірка цілісності</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- dot indicators -->
-      <div class="gallery-dots" id="galDots" role="tablist" aria-label="Gallery navigation">
-        <button class="dot active" type="button" aria-label="Slide 1"></button>
-        <button class="dot" type="button" aria-label="Slide 2"></button>
-        <button class="dot" type="button" aria-label="Slide 3"></button>
-        <button class="dot" type="button" aria-label="Slide 4"></button>
       </div>
     </div>
   </section>
@@ -1343,42 +677,42 @@
       <h2 class="section-title" data-i18n="sec_title">Безпека на першому місці</h2>
       <p class="section-sub" data-i18n="sec_sub">Кожен аспект розроблений з акцентом на приватність</p>
       <div class="security-grid">
-        <div class="sec-item fade-up">
+        <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             X25519 + HKDF-SHA256
           </h3>
           <p data-i18n="sec_x25519">Еліптичний обмін Діффі-Хеллмана для генерації спільного ключа без передачі секретів по мережі.</p>
         </div>
-        <div class="sec-item fade-up">
+        <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             <span data-i18n="sec_aes_title">AES-256-GCM з AAD</span>
           </h3>
           <p data-i18n="sec_aes">Шифрування з аутентифікацією. Код сесії прив'язаний як Associated Data — запобігає підміні шифротексту.</p>
         </div>
-        <div class="sec-item fade-up">
+        <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             <span data-i18n="sec_sha_title">SHA-256 контроль цілісності</span>
           </h3>
           <p data-i18n="sec_sha">Кожен переданий файл перевіряється хешем. Навіть один змінений байт буде виявлено.</p>
         </div>
-        <div class="sec-item fade-up">
+        <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             <span data-i18n="sec_tls_title">TLS 1.3 транспорт</span>
           </h3>
           <p data-i18n="sec_tls">WebSocket через WSS з автоматичним сертифікатом Let's Encrypt. Подвійний шар шифрування.</p>
         </div>
-        <div class="sec-item fade-up">
+        <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             <span data-i18n="sec_zk_title">Zero-knowledge сервер</span>
           </h3>
           <p data-i18n="sec_zk">Relay сервер ніколи не бачить вміст файлів. Коди сесій хешуються — жодних логів контенту.</p>
         </div>
-        <div class="sec-item fade-up">
+        <div class="sec-item">
           <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             <span data-i18n="sec_oss_title">Відкритий код</span>
@@ -1407,65 +741,6 @@
     </div>
   </section>
 
-  <!-- FAQ -->
-  <section class="faq" id="faq">
-    <div class="container">
-      <h2 class="section-title" data-i18n="faq_title">Часті запитання</h2>
-      <p class="section-sub" data-i18n="faq_sub">Відповіді на найпопулярніші питання про SecureShare</p>
-      <div class="faq-list">
-
-        <div class="faq-item fade-up">
-          <button class="faq-q" type="button" aria-expanded="false">
-            <span data-i18n="faq_q1">Чи дійсно мої файли шифруються?</span>
-            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq_a1">Так. Кожен файл шифрується на пристрої відправника за допомогою AES-256-GCM з унікальним ключем, створеним через X25519. Relay-сервер бачить лише зашифровані дані і не має можливості їх розшифрувати.</p></div>
-        </div>
-
-        <div class="faq-item fade-up">
-          <button class="faq-q" type="button" aria-expanded="false">
-            <span data-i18n="faq_q2">Який максимальний розмір файлу?</span>
-            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq_a2">До 5 ГБ. Файли передаються чанками по 256 КБ з можливістю відновлення перерваної передачі — навіть якщо з'єднання обірвалось, не потрібно починати спочатку.</p></div>
-        </div>
-
-        <div class="faq-item fade-up">
-          <button class="faq-q" type="button" aria-expanded="false">
-            <span data-i18n="faq_q3">Чи потрібна реєстрація?</span>
-            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq_a3">Ні. Просто завантажте програму, оберіть файл і поділіться кодом сесії з отримувачем. Жодного акаунту, email чи телефону.</p></div>
-        </div>
-
-        <div class="faq-item fade-up">
-          <button class="faq-q" type="button" aria-expanded="false">
-            <span data-i18n="faq_q4">Що таке код верифікації?</span>
-            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq_a4">Після з'єднання обидва учасники бачать однаковий 8-символьний код. Якщо коди співпадають — з'єднання безпечне. Це захист від атаки «людина посередині» (MITM).</p></div>
-        </div>
-
-        <div class="faq-item fade-up">
-          <button class="faq-q" type="button" aria-expanded="false">
-            <span data-i18n="faq_q5">Які операційні системи підтримуються?</span>
-            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq_a5">Windows 10/11 та Linux (x64). Програма не потребує встановлення — просто завантажте і запустіть.</p></div>
-        </div>
-
-        <div class="faq-item fade-up">
-          <button class="faq-q" type="button" aria-expanded="false">
-            <span data-i18n="faq_q6">Чи зберігаються файли на сервері?</span>
-            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq_a6">Ні. Relay-сервер лише пересилає зашифровані пакети між учасниками в реальному часі. Після завершення передачі — нуль слідів. Коди сесій хешуються і не логуються.</p></div>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
   <!-- Changelog -->
   <section class="changelog" id="changelog">
     <div class="container">
@@ -1474,22 +749,6 @@
       <div class="timeline">
 
         <div class="tl-item latest">
-          <div class="tl-dot"></div>
-          <div class="tl-header">
-            <span class="tl-version">v3.4.0</span>
-            <span class="tl-date" data-i18n="date_feb_2026">Лютий 2026</span>
-            <span class="tl-tag feature" data-i18n="tag_i18n">Мультимовність</span>
-          </div>
-          <ul class="tl-changes">
-            <li class="feat" data-i18n="cl_340_1">Підтримка 3 мов у десктоп-програмі: українська, англійська, німецька</li>
-            <li class="feat" data-i18n="cl_340_2">Живе перемикання мови без перезапуску</li>
-            <li class="feat" data-i18n="cl_340_3">Мультимовний лендінг: UA / EN / DE</li>
-            <li class="feat" data-i18n="cl_340_4">Клікабельне посилання на сайт у довідці</li>
-            <li class="fix" data-i18n="cl_340_5">Виправлення лінтер-помилок та рефакторинг коду</li>
-          </ul>
-        </div>
-
-        <div class="tl-item major">
           <div class="tl-dot"></div>
           <div class="tl-header">
             <span class="tl-version">v3.3.1</span>
@@ -1573,7 +832,7 @@
     <div class="container">
       <span class="support-emoji">☕</span>
       <h2 class="section-title" data-i18n="support_title">Підтримайте проєкт</h2>
-      <p class="support-text" data-i18n="support_text1" data-i18n-html>
+      <p class="support-text" data-i18n="support_text1">
         SecureShare — це <strong>безкоштовний open-source проєкт</strong>, створений однією людиною у вільний час.
         Сервер, домен і розробка коштують грошей, а мотивація — вашої підтримки.
       </p>
@@ -1582,17 +841,17 @@
         та додавати нові фічі. Навіть маленький донат — це сигнал, що проєкт потрібен&nbsp;людям&nbsp;💛
       </p>
       <div class="support-details">
-        <div class="support-item fade-up">
+        <div class="support-item">
           <div class="support-item-icon">🖥️</div>
           <h4 data-i18n="support_server">Сервер</h4>
           <p data-i18n="support_server_desc">Relay працює 24/7 для вас</p>
         </div>
-        <div class="support-item fade-up">
+        <div class="support-item">
           <div class="support-item-icon">🔒</div>
           <h4 data-i18n="support_security">Безпека</h4>
           <p data-i18n="support_security_desc">Аудити, оновлення, патчі</p>
         </div>
-        <div class="support-item fade-up">
+        <div class="support-item">
           <div class="support-item-icon">🚀</div>
           <h4 data-i18n="support_dev">Розвиток</h4>
           <p data-i18n="support_dev_desc">Нові платформи та фічі</p>
@@ -1602,31 +861,28 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
         <span data-i18n="support_btn">Пригостити кавою</span>
       </a>
-      <p class="support-note" data-i18n="support_note" data-i18n-html>
+      <p class="support-note" data-i18n="support_note">
         ⭐ Також можете поставити зірку на <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a> — це безкоштовно і дуже мотивує!
       </p>
     </div>
   </section>
 
   <!-- Footer -->
-  <footer role="contentinfo">
+  <footer>
     <div class="container">
       <div class="footer-links">
         <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/USER_GUIDE.md" target="_blank" rel="noopener" data-i18n="footer_docs">Документація</a>
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/DEVELOPER.md" target="_blank" rel="noopener" data-i18n="footer_devs">Для розробників</a>
-        <a href="#faq" data-i18n="footer_faq">FAQ</a>
         <a href="#changelog" data-i18n="footer_changelog">Що нового</a>
         <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener" data-i18n="footer_bug">Повідомити про баг</a>
-        <a href="mailto:art.marchenko@gmail.com" data-i18n="footer_contact">Зв'язатися</a>
-        <a href="/privacy.html" data-i18n="footer_privacy">Конфіденційність</a>
         <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener" data-i18n="footer_support">☕ Підтримати</a>
       </div>
-      <p>SecureShare v3.4.0 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
+      <p>SecureShare v3.3.1 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
     </div>
   </footer>
 
-  <script src="/i18n.js" defer></script>
+  <script src="/i18n.js"></script>
 
 </body>
 </html>
