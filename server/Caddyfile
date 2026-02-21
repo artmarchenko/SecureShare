@@ -46,6 +46,13 @@ secureshare-relay.duckdns.org {
 		header Content-Security-Policy "default-src 'none'"
 		header Content-Disposition "attachment"
 		header Cache-Control "no-cache"
+		header X-Content-Type-Options "nosniff"
+		header X-Frame-Options "DENY"
+		header Referrer-Policy "no-referrer"
+		header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		header Cross-Origin-Opener-Policy "same-origin"
+		header Cross-Origin-Resource-Policy "same-origin"
+		header -Server
 		uri strip_prefix /download
 		root * /downloads
 		file_server
