@@ -48,7 +48,6 @@ from analytics import (
     TELEMETRY_RATE_LIMIT,
     MAX_CRASH_BODY,
     MAX_TELEMETRY_BODY,
-    _now_iso,
 )
 
 # ── Configuration (env vars or defaults) ─────────────────────────────
