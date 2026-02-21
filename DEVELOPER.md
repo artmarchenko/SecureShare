@@ -2,7 +2,7 @@
 
 > Comprehensive technical documentation for developers, auditors, and contributors.
 >
-> **Version:** 3.2 · **Architecture:** VPS-only relay · **Author:** Artem Marchenko
+> **Version:** 3.3 · **Architecture:** VPS-only relay · **Author:** Artem Marchenko
 
 ---
 
@@ -35,7 +35,7 @@ SecureShare is a desktop application for **one-time secure file transfers** betw
 |-----------|---------------|
 | **Zero-knowledge relay** | Server never sees plaintext; all data is E2E encrypted |
 | **Minimal trust** | Users verify connection via visual security code (anti-MITM) |
-| **Single binary** | Distributed as a standalone `.exe` — no installation needed |
+| **Single binary** | Distributed as a standalone `.exe` (Win) or binary (Linux) — no installation needed |
 | **Ephemeral sessions** | Session codes are single-use, rooms auto-expire after 30 min |
 | **Defense in depth** | TLS transport + E2E encryption + signaling encryption + integrity check |
 
@@ -71,11 +71,15 @@ Sender                                               Receiver
 │                        Caddy Reverse Proxy                              │
 │                                                                         │
 │  • Auto-TLS via Let's Encrypt                                          │
-│  • HSTS, X-Content-Type-Options, X-Frame-Options                       │
-│  • X-Forwarded-For injection (real client IP)                          │
-│  • /health endpoint (responds 200 OK)                                  │
-│  • /download/* endpoint (serves .zip releases)                         │
-│  Port 443 (HTTPS/WSS) ─────────────────────────────► Port 8765 (WS)   │
+│  • HSTS, X-Content-Type-Options, X-Frame-Options, Permissions-Policy   │
+│  • Auto X-Forwarded-For (real client IP)                               │
+│  • /           → Landing page (static files from /www)                 │
+│  • /health     → Relay health check (proxy to relay:8766)              │
+│  • /api/*      → API endpoints (proxy to relay:8766)                   │
+│  • /admin      → Admin dashboard (static from /www)                    │
+│  • /download/* → Static file server (.zip/.tar.gz releases)            │
+│  • @websocket  → WebSocket relay (proxy to relay:8765)                 │
+│  Port 443 (HTTPS/WSS) ──────────────► Port 8765 (WS) / 8766 (HTTP)   │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -88,9 +92,10 @@ Sender                                               Receiver
 │  • Per-session 5 GB data limit                                         │
 │  • Backpressure/flow control                                           │
 │  • Room timeout (30 min auto-cleanup)                                  │
-│  • Health check on :8766                                               │
+│  • Health check + API on :8766                                         │
+│  • Analytics & crash report collection (JSONL persistence)             │
 │  • Graceful shutdown (SIGTERM/SIGINT)                                  │
-│  Port 8765 (WS) + Port 8766 (HTTP health)                             │
+│  Port 8765 (WS) + Port 8766 (HTTP health + API)                       │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -106,7 +111,7 @@ Sender                                               Receiver
 | Container | Docker + Docker Compose | Isolation, reproducible deploys |
 | Hosting | Oracle Cloud (ARM VM) | Always Free tier VM |
 | DNS | DuckDNS | Free dynamic DNS subdomain |
-| CI/CD | GitHub Actions | Lint → Test → Build → Release → Deploy |
+| CI/CD | GitHub Actions | Lint, Test, Build, Release, Deploy (4 workflows) |
 
 ### Project Structure
 
@@ -117,31 +122,41 @@ fileshare/
 │   ├── config.py                 # Constants: URLs, limits, version, protocol
 │   ├── crypto_utils.py           # X25519, AES-256-GCM, HKDF, signaling crypto
 │   ├── gui.py                    # CustomTkinter GUI + transfer orchestration
-│   └── ws_relay.py               # VPS WebSocket relay sender/receiver
+│   ├── ws_relay.py               # VPS WebSocket relay sender/receiver
+│   ├── updater.py                # Auto-update: check, download, verify, install
+│   └── telemetry.py              # Crash reporting + anonymous session analytics
 │
 ├── server/                       # Relay server (deployed to VPS)
-│   ├── relay_server.py           # Async WebSocket relay (Python + websockets)
+│   ├── relay_server.py           # Async WebSocket relay + HTTP API (Python + websockets)
+│   ├── analytics.py              # Server-side analytics, crash store, rate limiting
 │   ├── Dockerfile                # Docker image (python:3.11-slim, non-root)
-│   ├── docker-compose.yml        # Services: relay + caddy
+│   ├── docker-compose.yml        # Services: relay + caddy + volumes
 │   ├── Caddyfile                 # Reverse proxy + auto-TLS + security headers
 │   ├── requirements.txt          # Server dependencies (websockets)
 │   ├── test_relay.py             # Server test suite (16+ tests)
-│   └── DEPLOY.md                 # Manual deployment guide
+│   ├── DEPLOY.md                 # Manual deployment guide
+│   └── www/                      # Static web content (mounted in Caddy)
+│       ├── index.html            # Landing page
+│       └── admin.html            # Admin dashboard (stats, crashes, logs)
 │
 ├── assets/                       # Application assets
 │   ├── SecureShare.png           # Logo (1024×1024 RGBA)
 │   ├── SecureShare.ico           # Multi-size icon (16–256px)
 │   └── icon_32.png               # 32×32 icon for window/taskbar
 │
-├── .github/workflows/            # CI/CD
-│   ├── ci.yml                    # Lint + import check (every push)
-│   └── release.yml               # Build + test + release + deploy (on v* tag)
+├── .github/workflows/            # CI/CD (4 independent workflows)
+│   ├── ci.yml                    # Lint + import check (on push to app code)
+│   ├── release.yml               # Build Win+Linux + GitHub Release (on v* tag)
+│   ├── deploy-web.yml            # Deploy landing page (on push to server/www/)
+│   └── deploy-server.yml         # Deploy relay server (on push to server/*.py)
 │
-├── main.py                       # Entry point (logging setup + App launch)
-├── build.py                      # PyInstaller build script
-├── SecureShare.spec              # PyInstaller spec (icon, datas, hidden imports)
+├── main.py                       # Entry point (logging setup + crash handler)
+├── build.py                      # PyInstaller build script (Win + Linux)
+├── SecureShare.spec              # PyInstaller spec — Windows
+├── SecureShare-linux.spec        # PyInstaller spec — Linux
 ├── version_info.txt              # Windows .exe metadata (version, publisher)
 ├── requirements.txt              # Client Python dependencies
+├── LICENSE                       # MIT License
 ├── .flake8                       # Linter configuration
 ├── .gitignore                    # Git ignore rules
 └── .env                          # Local secrets (not in repo)
@@ -192,7 +207,7 @@ Even if one layer is compromised, the others provide protection:
                      │      type: "pub_key",                  │
                      │      key: <X25519 pub>,                │
                      │      protocol_version: 1,              │
-                     │      app_version: "3.2.0",             │
+                     │      app_version: "3.3.x",             │
                      │      reconnect_token: <opt>            │
                      │    }) ─────────────────────────────────►│
                      │                                        │
@@ -314,7 +329,7 @@ Every WebSocket message has a 1-byte type prefix:
 ```
 
 JSON payload types:
-- `{"type": "pub_key", "key": "<base64>", "protocol_version": 1, "app_version": "3.2.0", "reconnect_token": "<base64>"}` *(reconnect_token is optional, present on reconnect)*
+- `{"type": "pub_key", "key": "<base64>", "protocol_version": 1, "app_version": "3.3.x", "reconnect_token": "<base64>"}` *(reconnect_token is optional, present on reconnect)*
 - `{"type": "verified"}`
 - `{"type": "verify_reject"}`
 
@@ -528,6 +543,10 @@ After successful verification, both sides compute and store this token. On recon
 | Log copy/export | Buttons to copy log to clipboard or save to file |
 | Help dialog | Step-by-step instructions with colored sections |
 | Diagnostics | 5-point connectivity check: Internet, DNS, TLS, WebSocket, Latency |
+| Auto-update check | Silent check on startup + manual "🔄" button; download, verify SHA-256, install |
+| Donate button | "❤️" button opens Ko-fi donation page |
+| Telemetry opt-in | Toggles in Diagnostics window for crash reports and anonymous analytics |
+| Startup tips | Random informational/motivational messages on launch |
 | Cancel | Stops transfer at any point, closes connection |
 
 ### 5.4. Diagnostics Checks
@@ -548,7 +567,7 @@ The built-in diagnostics button runs these checks sequentially:
 
 The relay server is intentionally minimal:
 - **Zero knowledge**: never inspects, logs, or stores payload content
-- **Stateless**: all state is in-memory, no database or disk persistence
+- **Stateless relay**: session state is in-memory; analytics/crashes persist to JSONL on disk
 - **Session codes are hashed**: server stores `SHA-256(code)[:32]` — original code never in memory
 
 ### 6.2. Connection Lifecycle
@@ -666,7 +685,7 @@ Internet
 **Relay container:**
 - Base image: `python:3.11-slim`
 - Non-root user (`relay`)
-- Read-only filesystem (`read_only: true`)
+- Read-only filesystem (`read_only: true`) with writable `/data` volume for analytics
 - No new privileges (`no-new-privileges:true`)
 - Memory limit: 256 MB
 - CPU limit: 0.5 cores
@@ -677,7 +696,7 @@ Internet
 - Official `caddy:2` image
 - Memory limit: 128 MB
 - CPU limit: 0.25 cores
-- Volumes: Caddyfile (ro), downloads (ro), data, config
+- Volumes: Caddyfile (ro), downloads (ro), www (ro), data, config
 
 ### 7.4. VPS Hardening
 
@@ -693,12 +712,14 @@ Internet
 
 ## 8. CI/CD Pipeline
 
-### 8.1. Workflow: `ci.yml` (every push)
+The project uses **4 independent GitHub Actions workflows**, each targeting a specific deployment scope to minimize downtime and avoid unnecessary rebuilds. All VPS-targeting workflows share a `concurrency: vps-deploy` group to prevent race conditions.
+
+### 8.1. Workflow: `ci.yml` (on push to app code)
 
 ```
-Push to any branch
+Push to main (app/**, main.py, build.py, server/*.py)
   │
-  └─ lint-and-check (ubuntu-latest, ~25s)
+  └─ lint (ubuntu-latest, ~1 min)
       ├─ flake8 lint (app/ + server/)
       └─ Import verification (all key modules)
 ```
@@ -718,43 +739,77 @@ Push tag v*
   │   ├─ Package → .zip         │
   │   └─ Upload artifact        │
   │                              │
-  ├─ release (ubuntu) ──────────┤ (needs: build + server-tests)
+  ├─ build-linux (ubuntu) ──────┤ (needs: lint)
+  │   ├─ PyInstaller → binary   │
+  │   ├─ Package → .tar.gz      │
+  │   └─ Upload artifact        │
+  │                              │
+  ├─ release (ubuntu) ──────────┤ (needs: build + build-linux + server-tests)
+  │   ├─ Generate SHA256SUMS    │
   │   ├─ Generate changelog     │
   │   ├─ Create GitHub Release  │
-  │   └─ Attach .exe + .zip     │
+  │   └─ Attach Win + Linux     │
   │                              │
-  └─ deploy (ubuntu) ───────────┘ (needs: release)
-      ├─ SCP server files to VPS
+  └─ upload-binaries (ubuntu) ──┘ (needs: release, NO relay restart)
       ├─ SCP .zip to /downloads
-      ├─ docker compose up --build
+      ├─ SCP .tar.gz to /downloads
+      └─ Verify download URLs
+```
+
+**Note:** `release.yml` does NOT restart the relay server. It only uploads client binaries to the VPS `/downloads` directory.
+
+### 8.3. Workflow: `deploy-web.yml` (on push to `server/www/**`)
+
+```
+Push to main (server/www/**)
+  │
+  └─ deploy-web (ubuntu, ~30s)
+      ├─ SCP static files to VPS /www
+      ├─ Verify landing page (HTTP 200)
+      └─ Verify relay NOT restarted (zero downtime)
+```
+
+### 8.4. Workflow: `deploy-server.yml` (on push to server code)
+
+```
+Push to main (server/*.py, Dockerfile, docker-compose.yml, Caddyfile)
+  │
+  └─ deploy-server (ubuntu, ~2-3 min)
+      ├─ Detect what changed
+      ├─ SCP server files to VPS
+      ├─ IF relay code changed → docker compose build + restart relay
+      ├─ IF Caddyfile changed → caddy reload (or restart)
+      ├─ IF docker-compose.yml changed → full docker compose up
       └─ Health check
 ```
 
-### 8.3. Release Process
+### 8.5. Release Process
 
 ```bash
 # 1. Bump version in config.py + version_info.txt
 # 2. Commit
-git commit -am "Bump version to 3.0.4"
+git commit -am "Bump version to 3.3.1"
 
 # 3. Tag and push
-git tag v3.0.4
+git tag v3.3.1
 git push origin main --tags
 
-# 4. GitHub Actions handles everything:
+# 4. GitHub Actions handles:
 #    - Lint + test
-#    - Build .exe on Windows runner
-#    - Create GitHub Release with .zip + .exe
-#    - Deploy updated server to VPS
-#    - Upload .zip to VPS /download endpoint
+#    - Build .exe (Windows) + binary (Linux)
+#    - Generate SHA256SUMS.txt
+#    - Create GitHub Release with Win + Linux assets
+#    - Upload binaries to VPS /downloads
+#    (Server deploy is separate — only triggered by server code changes)
 ```
 
-### 8.4. Distribution
+### 8.6. Distribution
 
 | Channel | URL | Content |
 |---------|-----|---------|
-| GitHub Releases | `github.com/artmarchenko/SecureShare/releases` | `.exe` + `.zip` per version |
-| VPS Download | `https://secureshare-relay.duckdns.org/download/SecureShare.zip` | Latest `.zip` (always up-to-date) |
+| GitHub Releases | `github.com/artmarchenko/SecureShare/releases` | `.exe` + `.zip` + `.tar.gz` per version |
+| VPS Download (Win) | `https://secureshare-relay.duckdns.org/download/SecureShare.zip` | Latest Windows `.zip` |
+| VPS Download (Linux) | `https://secureshare-relay.duckdns.org/download/SecureShare-linux-x64.tar.gz` | Latest Linux `.tar.gz` |
 
 ---
 
@@ -777,7 +832,10 @@ git push origin main --tags
 | `RECONNECT_BASE_DELAY` | `5` | Base delay (seconds, exponential backoff) |
 | `RECONNECT_MAX_DELAY` | `60` | Max delay cap (seconds) |
 | `APP_NAME` | `"SecureShare"` | Application name |
-| `APP_VERSION` | `"3.2.0"` | Application version |
+| `APP_VERSION` | `"3.3.1"` | Application version |
+| `HOMEPAGE_URL` | `"https://secureshare-relay.duckdns.org"` | Landing page URL |
+| `DONATE_URL` | `"https://ko-fi.com/secureshare"` | Donation page URL |
+| `GITHUB_URL` | `"https://github.com/artmarchenko/SecureShare"` | GitHub repository URL |
 
 ### 9.2. Server (`relay_server.py`, via env vars)
 
@@ -794,6 +852,11 @@ git push origin main --tags
 | `RELAY_BP_LOW` | `1048576` | Backpressure low watermark (1 MB) |
 | `RELAY_TRUSTED_PROXIES` | `172.16.0.0/12,...` | Trusted proxy subnets for XFF |
 | `RELAY_LOG_FORMAT` | `text` | Log format: `text` or `json` |
+| `RELAY_DATA_DIR` | `/data` | Directory for analytics JSONL persistence |
+| `RELAY_ADMIN_KEY` | *(none)* | Secret key for admin API access |
+| `RELAY_LATEST_VERSION` | `"3.3.1"` | Reported as latest client version via `/api/version` |
+| `TELEGRAM_BOT_TOKEN` | *(none)* | Telegram bot token for critical alerts |
+| `TELEGRAM_CHAT_ID` | *(none)* | Telegram chat ID for critical alerts |
 
 ---
 
@@ -802,7 +865,7 @@ git push origin main --tags
 ### 10.1. Prerequisites
 
 - Python 3.11+
-- Windows 10/11 (for GUI and .exe build)
+- Windows 10/11 or Linux (64-bit)
 - Git
 
 ### 10.2. Clone and Install
@@ -834,7 +897,8 @@ python build.py
 
 ```bash
 pip install flake8
-flake8 app/ main.py build.py server/relay_server.py
+flake8 app/ main.py build.py
+flake8 server/relay_server.py
 ```
 
 ---
@@ -899,9 +963,9 @@ Secrets configured in repository settings:
 
 | Secret | Used in | Purpose |
 |--------|---------|---------|
-| `VPS_HOST` | `release.yml` | VPS IP address for deployment |
-| `VPS_USER` | `release.yml` | SSH username on VPS |
-| `VPS_SSH_KEY` | `release.yml` | Full SSH private key for VPS access |
+| `VPS_HOST` | all deploy workflows | VPS IP address for deployment |
+| `VPS_USER` | all deploy workflows | SSH username on VPS |
+| `VPS_SSH_KEY` | all deploy workflows | Full SSH private key for VPS access |
 | `CERT_THUMBPRINT` | *(future)* | Code signing certificate |
 | `DUCKDNS_TOKEN` | *(future)* | DuckDNS API token for IP updates |
 | `GITHUB_TOKEN` | `release.yml` | Auto-provided for GitHub Release creation |
@@ -921,7 +985,7 @@ Secrets configured in repository settings:
 |-----------|--------|------------|
 | **5 GB per session** | Server-enforced to prevent abuse on free VPS | Split large files; use archives |
 | **One file per session** | Protocol design for simplicity | Use ZIP/TAR for multiple files |
-| **Windows only** | CustomTkinter + PyInstaller target Windows | Run from source on macOS/Linux |
+| **Windows & Linux** | macOS not officially supported | Run from source on macOS |
 | **Single relay server** | Architecture choice | Can deploy additional relays |
 | **No offline mode** | Relay-dependent architecture | Both users must be online |
 
@@ -964,4 +1028,4 @@ Secrets configured in repository settings:
 
 ---
 
-*Last updated: February 2026 · v3.2*
+*Last updated: February 2026 · v3.3*

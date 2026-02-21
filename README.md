@@ -3,8 +3,8 @@
 **Secure end-to-end encrypted file sharing** — a standalone .exe for transferring files securely between two computers over the internet.
 
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)
-![License](https://img.shields.io/badge/license-proprietary-red)
-![Version](https://img.shields.io/badge/version-3.0.0-green)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-3.3.1-green)
 
 ## What is it
 
@@ -16,8 +16,10 @@ SecureShare is a desktop application with a graphical interface for one-time sec
 - **VPS Relay** — dedicated relay server with automatic TLS (Let's Encrypt)
 - **MITM Verification** — visual security code comparison
 - **SHA-256 Integrity** — hash verification after transfer
+- **Auto-Reconnect & Resume** — transfers survive network interruptions
+- **Auto-Update** — checks for new versions on startup with SHA-256 verification
 - **Built-in Diagnostics** — connectivity and server health checks
-- **Single .exe file** — no installation, no dependencies
+- **Cross-platform** — Windows (.exe) and Linux binaries; no installation needed
 - **5 GB session limit** — per-session data transfer cap
 
 ## How to Use
@@ -76,7 +78,7 @@ Sender                          VPS Relay                     Receiver
 ### Requirements
 
 - Python 3.11+
-- Windows 10/11
+- Windows 10/11 or Linux (64-bit)
 
 ### Install Dependencies
 
@@ -90,34 +92,41 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Build .exe
+### Build
 
 ```bash
-pyinstaller SecureShare.spec
+python build.py
 ```
 
-Result: `dist/SecureShare.exe`
+Result: `dist/SecureShare.exe` (Windows) or `dist/SecureShare` (Linux)
 
 ## Project Structure
 
 ```
 fileshare/
 ├── app/
-│   ├── config.py          # Configuration (VPS URL, limits, version)
+│   ├── config.py          # Configuration (VPS URL, limits, version, links)
 │   ├── crypto_utils.py    # X25519, AES-256-GCM, HKDF, signaling crypto
 │   ├── gui.py             # CustomTkinter GUI + transfer orchestration
-│   └── ws_relay.py        # VPS WebSocket relay sender/receiver
+│   ├── ws_relay.py        # VPS WebSocket relay sender/receiver
+│   ├── updater.py         # Auto-update: check, download, verify, install
+│   └── telemetry.py       # Crash reports + anonymous analytics (opt-in)
 ├── server/
-│   ├── relay_server.py    # VPS relay server (Python + websockets)
+│   ├── relay_server.py    # VPS relay server + HTTP API (Python + websockets)
+│   ├── analytics.py       # Analytics, crash store, rate limiting
 │   ├── Dockerfile         # Docker image for relay server
 │   ├── docker-compose.yml # Docker Compose (relay + Caddy)
 │   ├── Caddyfile          # Caddy reverse proxy + auto-TLS
-│   ├── test_relay.py      # Server test suite
-│   └── DEPLOY.md          # Deployment instructions (Oracle Cloud)
+│   ├── test_relay.py      # Server test suite (16+ tests)
+│   ├── DEPLOY.md          # Deployment instructions (Oracle Cloud)
+│   └── www/               # Landing page + admin dashboard
 ├── main.py                # Entry point
+├── build.py               # PyInstaller build script (Win + Linux)
 ├── requirements.txt       # Python dependencies
-├── SecureShare.spec        # PyInstaller build spec
-└── version_info.txt       # .exe metadata (version, publisher)
+├── SecureShare.spec       # PyInstaller spec (Windows)
+├── SecureShare-linux.spec # PyInstaller spec (Linux)
+├── version_info.txt       # .exe metadata (version, publisher)
+└── LICENSE                # MIT License
 ```
 
 ## Security
@@ -148,6 +157,7 @@ fileshare/
 - One file per session (use archives for multiple files)
 - Both devices must have internet access
 - Session codes are single-use
+- macOS is not officially supported (run from source)
 
 ## Logs
 
@@ -160,4 +170,4 @@ Use the built-in "Copy Log" or "Save Log" buttons for diagnostics.
 
 ## Author
 
-**Artem Marchenko** — (c) 2026. All rights reserved.
+**Artem Marchenko** — © 2026. MIT License.
