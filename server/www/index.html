@@ -772,6 +772,24 @@
       flex-wrap: wrap;
     }
 
+    /* ── Skip Link (a11y) ─────────────────────────── */
+    .skip-link {
+      position: absolute;
+      top: -100px;
+      left: 16px;
+      z-index: 10000;
+      background: var(--blue);
+      color: var(--white);
+      padding: 12px 24px;
+      border-radius: 0 0 8px 8px;
+      font-weight: 600;
+      transition: top .2s;
+    }
+    .skip-link:focus {
+      top: 0;
+      text-decoration: none;
+    }
+
     /* ── Language Toggle ──────────────────────────── */
     .lang-toggle {
       position: fixed;
@@ -892,15 +910,18 @@
 </head>
 <body>
 
+  <!-- Skip to content (a11y) -->
+  <a href="#features" class="skip-link">Skip to content</a>
+
   <!-- Language Toggle -->
-  <div class="lang-toggle" id="langToggle">
+  <div class="lang-toggle" id="langToggle" role="group" aria-label="Language selection">
     <button class="lang-btn active" data-lang="uk" id="btnUk" type="button">UA</button>
     <button class="lang-btn" data-lang="en" id="btnEn" type="button">EN</button>
     <button class="lang-btn" data-lang="de" id="btnDe" type="button">DE</button>
   </div>
 
   <!-- Hero -->
-  <section class="hero">
+  <section class="hero" role="banner">
     <div class="container hero-content">
       <img src="/logo.png" alt="SecureShare" class="hero-logo" width="120" height="120" fetchpriority="high">
       <h1>Secure<span>Share</span></h1>
@@ -1077,7 +1098,7 @@
       </div>
 
       <!-- dot indicators -->
-      <div class="gallery-dots" id="galDots">
+      <div class="gallery-dots" id="galDots" role="tablist" aria-label="Gallery navigation">
         <button class="dot active" type="button" aria-label="Slide 1"></button>
         <button class="dot" type="button" aria-label="Slide 2"></button>
         <button class="dot" type="button" aria-label="Slide 3"></button>
@@ -1164,7 +1185,7 @@
       <div class="faq-list">
 
         <div class="faq-item fade-up">
-          <button class="faq-q" type="button">
+          <button class="faq-q" type="button" aria-expanded="false">
             <span data-i18n="faq_q1">Чи дійсно мої файли шифруються?</span>
             <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -1172,7 +1193,7 @@
         </div>
 
         <div class="faq-item fade-up">
-          <button class="faq-q" type="button">
+          <button class="faq-q" type="button" aria-expanded="false">
             <span data-i18n="faq_q2">Який максимальний розмір файлу?</span>
             <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -1180,7 +1201,7 @@
         </div>
 
         <div class="faq-item fade-up">
-          <button class="faq-q" type="button">
+          <button class="faq-q" type="button" aria-expanded="false">
             <span data-i18n="faq_q3">Чи потрібна реєстрація?</span>
             <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -1188,7 +1209,7 @@
         </div>
 
         <div class="faq-item fade-up">
-          <button class="faq-q" type="button">
+          <button class="faq-q" type="button" aria-expanded="false">
             <span data-i18n="faq_q4">Що таке код верифікації?</span>
             <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -1196,7 +1217,7 @@
         </div>
 
         <div class="faq-item fade-up">
-          <button class="faq-q" type="button">
+          <button class="faq-q" type="button" aria-expanded="false">
             <span data-i18n="faq_q5">Які операційні системи підтримуються?</span>
             <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -1204,7 +1225,7 @@
         </div>
 
         <div class="faq-item fade-up">
-          <button class="faq-q" type="button">
+          <button class="faq-q" type="button" aria-expanded="false">
             <span data-i18n="faq_q6">Чи зберігаються файли на сервері?</span>
             <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -1358,7 +1379,7 @@
   </section>
 
   <!-- Footer -->
-  <footer>
+  <footer role="contentinfo">
     <div class="container">
       <div class="footer-links">
         <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a>

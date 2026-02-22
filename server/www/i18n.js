@@ -335,9 +335,14 @@
           /* close all */
           for (var k = 0; k < faqItems.length; k++) {
             faqItems[k].classList.remove('open');
+            var b = faqItems[k].querySelector('.faq-q');
+            if (b) b.setAttribute('aria-expanded', 'false');
           }
           /* toggle clicked */
-          if (!isOpen) item.classList.add('open');
+          if (!isOpen) {
+            item.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+          }
         });
       }
     })(faqItems[f]);
