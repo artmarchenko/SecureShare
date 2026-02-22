@@ -95,6 +95,7 @@ from .config import (
     RECONNECT_BASE_DELAY,
     RECONNECT_MAX_DELAY,
 )
+from .i18n import t
 from .crypto_utils import (
     CryptoSession,
     derive_signaling_key,
@@ -276,31 +277,31 @@ def _do_key_exchange(
     ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, sig_payload))
 
     if on_status:
-        on_status("🔑 Обмін ключами...")
+        on_status(t("relay_key_exchange"))
 
     # Receive peer's public key (blocks until peer connects + sends)
     try:
         raw = ws.recv()
     except Exception as e:
         if on_status:
-            on_status(f"❌ Помилка обміну ключами: {e}")
+            on_status(t("relay_key_exchange_error", error=str(e)))
         return None, None
 
     if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
         if on_status:
-            on_status("❌ Невірний формат обміну ключами")
+            on_status(t("relay_key_format_error"))
         return None, None
 
     try:
         peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
     except Exception:
         if on_status:
-            on_status("❌ Помилка розшифрування ключа партнера")
+            on_status(t("relay_key_decrypt_error"))
         return None, None
 
     if peer_msg.get("type") != "pub_key" or "key" not in peer_msg:
         if on_status:
-            on_status("❌ Невірне повідомлення обміну ключами")
+            on_status(t("relay_key_message_error"))
         return None, None
 
     # ── Version compatibility check ─────────────────────────────
@@ -312,18 +313,14 @@ def _do_key_exchange(
         PROTOCOL_VERSION, APP_VERSION, peer_proto, peer_app,
     )
     if on_status:
-        on_status(
-            f"🔗 Протокол: v{PROTOCOL_VERSION} ↔ v{peer_proto} "
-            f"(app {APP_VERSION} ↔ {peer_app})"
-        )
+        on_status(t("relay_protocol_info",
+                our_proto=PROTOCOL_VERSION, peer_proto=peer_proto,
+                our_app=APP_VERSION, peer_app=peer_app))
 
     if peer_proto < MIN_PROTOCOL_VERSION:
         if on_status:
-            on_status(
-                f"❌ Несумісна версія партнера (протокол v{peer_proto}, "
-                f"потрібно v{MIN_PROTOCOL_VERSION}+). "
-                f"Попросіть партнера оновити програму."
-            )
+            on_status(t("relay_incompatible",
+                peer_proto=peer_proto, min_proto=MIN_PROTOCOL_VERSION))
         return None, None
 
     if PROTOCOL_VERSION < peer_proto:
@@ -334,10 +331,7 @@ def _do_key_exchange(
             peer_proto, PROTOCOL_VERSION,
         )
         if on_status:
-            on_status(
-                f"⚠️ Партнер має новішу версію (v{peer_app}). "
-                f"Рекомендуємо оновити програму."
-            )
+            on_status(t("relay_peer_newer", peer_app=peer_app))
 
     # ── Derive shared key ───────────────────────────────────────
     peer_pub_key = base64.b64decode(peer_msg["key"])
@@ -367,7 +361,7 @@ def _do_verification(
 
     if auto_verify:
         if on_status:
-            on_status("🔄 Авто-верифікація (перепідключення)")
+            on_status(t("relay_auto_verify"))
         # Send confirmation without user interaction
         confirm_payload = json.dumps({"type": "verified"}).encode()
         ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, confirm_payload))
@@ -376,7 +370,7 @@ def _do_verification(
             raw = ws.recv()
         except Exception as e:
             if on_status:
-                on_status(f"❌ Помилка авто-верифікації: {e}")
+                on_status(t("relay_auto_verify_error", error=str(e)))
             return False
 
         if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
@@ -389,13 +383,13 @@ def _do_verification(
 
         if peer_msg.get("type") == "verified":
             if on_status:
-                on_status("✅ Авто-верифікацію підтверджено")
+                on_status(t("relay_auto_verify_ok"))
             return True
         return False
 
     # ── Normal verification (user interaction) ────────────────
     if on_status:
-        on_status(f"🔑 Код верифікації: {verification_code}")
+        on_status(t("relay_verify_code", code=verification_code))
 
     # Ask user to verify
     if not on_verify(verification_code):
@@ -406,7 +400,7 @@ def _do_verification(
         except Exception:
             pass
         if on_status:
-            on_status("❌ Верифікацію відхилено")
+            on_status(t("relay_verify_rejected"))
         return False
 
     # Send verification confirmation
@@ -414,40 +408,40 @@ def _do_verification(
     ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, confirm_payload))
 
     if on_status:
-        on_status("✅ Верифікацію підтверджено, чекаю підтвердження від партнера...")
+        on_status(t("relay_verify_confirmed"))
 
     # Wait for peer's verification
     try:
         raw = ws.recv()
     except Exception as e:
         if on_status:
-            on_status(f"❌ Помилка верифікації: {e}")
+            on_status(t("relay_verify_error", error=str(e)))
         return False
 
     if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
         if on_status:
-            on_status("❌ Невірний формат верифікації")
+            on_status(t("relay_verify_format_error"))
         return False
 
     try:
         peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
     except Exception:
         if on_status:
-            on_status("❌ Помилка розшифрування верифікації")
+            on_status(t("relay_verify_decrypt_error"))
         return False
 
     if peer_msg.get("type") == "verify_reject":
         if on_status:
-            on_status("❌ Партнер відхилив верифікацію")
+            on_status(t("relay_peer_rejected"))
         return False
 
     if peer_msg.get("type") != "verified":
         if on_status:
-            on_status("❌ Невірне повідомлення верифікації")
+            on_status(t("relay_verify_msg_error"))
         return False
 
     if on_status:
-        on_status("✅ Обидві сторони підтвердили верифікацію")
+        on_status(t("relay_both_verified"))
 
     return True
 
@@ -507,20 +501,20 @@ class VPSRelaySender:
         Returns True on success, False on failure/cancel.
         """
         if not _HAS_WS:
-            self._log("❌ Потрібен пакет websocket-client")
+            self._log(t("relay_need_ws"))
             return False
 
         # Pre-compute file metadata once (expensive for large files)
         try:
             file_name = self._filepath.name
             file_size = self._filepath.stat().st_size
-            self._log(f"🔍 Обчислюю хеш {file_name}...")
+            self._log(t("relay_computing_hash", filename=file_name))
             self._file_hash = _sha256_file(self._filepath)
             self._transfer_id = _make_transfer_id(
                 file_name, file_size, self._file_hash
             )
         except Exception as exc:
-            self._log(f"❌ Помилка читання файлу: {exc}")
+            self._log(t("relay_file_read_error", error=str(exc)))
             return False
 
         for attempt in range(RECONNECT_MAX_RETRIES + 1):
@@ -532,10 +526,8 @@ class VPSRelaySender:
                     RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
                     RECONNECT_MAX_DELAY,
                 )
-                self._log(
-                    f"🔄 Перепідключення через {delay:.0f}с "
-                    f"(спроба {attempt}/{RECONNECT_MAX_RETRIES})..."
-                )
+                self._log(t("relay_reconnecting",
+                    delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
                 time.sleep(delay)
                 if self._cancelled:
                     return False
@@ -551,14 +543,14 @@ class VPSRelaySender:
                     # Permanent failure (cancel, verification rejected, etc.)
                     return False
                 # result is None → connection lost, retry
-                self._log("⚠️ З'єднання втрачено")
+                self._log(t("relay_connection_lost"))
             except Exception as exc:
-                self._log(f"❌ Помилка: {exc}")
+                self._log(t("transfer_error_generic", error=str(exc)))
                 log.exception("VPSRelaySender error")
             finally:
                 self._close()
 
-        self._log("❌ Вичерпано спроби перепідключення")
+        self._log(t("relay_retries_exhausted"))
         return False
 
     def _send_attempt(self, is_reconnect: bool = False) -> Optional[bool]:
@@ -571,22 +563,22 @@ class VPSRelaySender:
         """
         # ── 1. Connect to VPS ─────────────────────────────────────
         if is_reconnect:
-            self._log("🌐 Перепідключаюсь до relay сервера...")
+            self._log(t("relay_reconnecting_to"))
         else:
-            self._log("🌐 Підключаюсь до relay сервера...")
+            self._log(t("relay_connecting_to"))
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(VPS_RELAY_URL, timeout=30)
             self._ws.settimeout(300)       # 5 min to wait for peer
             self._ws.send(self._code)      # register session code
         except Exception as exc:
-            self._log(f"❌ Помилка підключення до relay: {exc}")
+            self._log(t("relay_connect_error", error=str(exc)))
             # DNS failures are transient — always allow retry
             if _is_dns_error(exc):
                 return None
             return None if is_reconnect else False
 
-        self._log("⏳ Чекаю отримувача...")
+        self._log(t("relay_waiting_receiver"))
 
         # ── 2. Key exchange ───────────────────────────────────────
         self._crypto, peer_token = _do_key_exchange(
@@ -644,14 +636,14 @@ class VPSRelaySender:
         }).encode())
 
         # Wait for meta ACK (may include resume info)
-        self._log("⏳ Чекаю підтвердження метаданих...")
+        self._log(t("relay_waiting_meta_ack"))
         try:
             ack = self._ctl_queue.get(timeout=120)
         except queue.Empty:
-            self._log("❌ Таймаут метаданих")
+            self._log(t("relay_meta_timeout"))
             return None  # retryable
         if ack.get("type") != "relay_meta_ack":
-            self._log("❌ Неочікувана відповідь на метадані")
+            self._log(t("relay_meta_unexpected"))
             return None
 
         # ── 5b. Check if receiver requests resume ─────────────────
@@ -665,25 +657,19 @@ class VPSRelaySender:
                 last_chunk_size = file_size - (total_chunks - 1) * VPS_CHUNK_SIZE
                 resume_bytes = resume_bytes - VPS_CHUNK_SIZE + last_chunk_size
             resume_bytes = min(resume_bytes, file_size)
-            self._log(
-                f"🔄 Відновлення: отримувач має {len(skip_chunks)}/{total_chunks} "
-                f"чанків ({resume_bytes / (1024**2):.1f} МБ)"
-            )
+            self._log(t("relay_resume_info",
+                received=len(skip_chunks), total=total_chunks,
+                mb=f"{resume_bytes / (1024**2):.1f}"))
 
         # ── 6. Send file chunks ───────────────────────────────────
-        size_str = (
-            f"{file_size / (1024**3):.1f} ГБ"
-            if file_size >= 1024**3
-            else f"{file_size / (1024**2):.1f} МБ"
-        )
+        from .gui import _human_size
+        size_str = _human_size(file_size)
         chunks_to_send = total_chunks - len(skip_chunks)
         if skip_chunks:
-            self._log(
-                f"📦 Надсилаю: {file_name} ({size_str}) — "
-                f"{chunks_to_send} чанків залишилось"
-            )
+            self._log(t("relay_sending_resume",
+                filename=file_name, size=size_str, chunks=chunks_to_send))
         else:
-            self._log(f"📦 Надсилаю: {file_name} ({size_str})")
+            self._log(t("relay_sending", filename=file_name, size=size_str))
 
         t0 = time.monotonic()
         sent_bytes = resume_bytes
@@ -729,7 +715,7 @@ class VPSRelaySender:
             "total_chunks": total_chunks,
         }).encode()
         self._send_ctl(done_payload)
-        self._log("⏳ Чекаю підтвердження цілісності...")
+        self._log(t("relay_waiting_integrity"))
 
         retransmit_rounds = 0
         deadline = time.monotonic() + 600
@@ -749,9 +735,9 @@ class VPSRelaySender:
             if msg.get("type") == "relay_done_ack":
                 ok = msg.get("verified", False)
                 if ok:
-                    self._log("🎉 Файл передано та перевірено ✓")
+                    self._log(t("relay_file_sent_ok"))
                 else:
-                    self._log("⚠ Хеш не збігається у отримувача")
+                    self._log(t("relay_hash_mismatch_sender"))
                 return ok
 
             elif msg.get("type") == "relay_retransmit" and retransmit_rounds < 5:
@@ -759,10 +745,8 @@ class VPSRelaySender:
                 if not missing:
                     continue
                 retransmit_rounds += 1
-                self._log(
-                    f"🔄 Ретрансміт {len(missing)} чанків "
-                    f"(раунд {retransmit_rounds})..."
-                )
+                self._log(t("relay_retransmit",
+                    count=len(missing), round=retransmit_rounds))
                 with open(self._filepath, "rb") as f:
                     for seq_i in missing:
                         if self._cancelled:
@@ -775,7 +759,7 @@ class VPSRelaySender:
                             self._send_dat(seq_i, chunk)
                 self._send_ctl(done_payload)
 
-        self._log("❌ Таймаут очікування підтвердження")
+        self._log(t("relay_integrity_timeout"))
         return None  # retryable (might be connection issue)
 
     # ── Send helpers ───────────────────────────────────────────────
@@ -878,7 +862,7 @@ class VPSRelayReceiver:
         Returns Path to saved file on success, None on failure/cancel.
         """
         if not _HAS_WS:
-            self._log("❌ Потрібен пакет websocket-client")
+            self._log(t("relay_need_ws"))
             return None
 
         for attempt in range(RECONNECT_MAX_RETRIES + 1):
@@ -890,10 +874,8 @@ class VPSRelayReceiver:
                     RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
                     RECONNECT_MAX_DELAY,
                 )
-                self._log(
-                    f"🔄 Перепідключення через {delay:.0f}с "
-                    f"(спроба {attempt}/{RECONNECT_MAX_RETRIES})..."
-                )
+                self._log(t("relay_reconnecting",
+                    delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
                 time.sleep(delay)
                 if self._cancelled:
                     return None
@@ -907,14 +889,14 @@ class VPSRelayReceiver:
                 if not self._retryable or self._cancelled:
                     return None   # permanent failure
                 # retryable → continue loop
-                self._log("⚠️ З'єднання втрачено")
+                self._log(t("relay_connection_lost"))
             except Exception as exc:
-                self._log(f"❌ Помилка: {exc}")
+                self._log(t("transfer_error_generic", error=str(exc)))
                 log.exception("VPSRelayReceiver error")
             finally:
                 self._close()
 
-        self._log("❌ Вичерпано спроби перепідключення")
+        self._log(t("relay_retries_exhausted"))
         return None
 
     def _receive_attempt(self, is_reconnect: bool = False) -> Optional[Path]:
@@ -925,21 +907,21 @@ class VPSRelayReceiver:
         """
         # ── 1. Connect to VPS ─────────────────────────────────────
         if is_reconnect:
-            self._log("🌐 Перепідключаюсь до relay сервера...")
+            self._log(t("relay_reconnecting_to"))
         else:
-            self._log("🌐 Підключаюсь до relay сервера...")
+            self._log(t("relay_connecting_to"))
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(VPS_RELAY_URL, timeout=30)
             self._ws.settimeout(300)
             self._ws.send(self._code)
         except Exception as exc:
-            self._log(f"❌ Помилка підключення до relay: {exc}")
+            self._log(t("relay_connect_error", error=str(exc)))
             # DNS failures are transient — always allow retry
             self._retryable = is_reconnect or _is_dns_error(exc)
             return None
 
-        self._log("⏳ Чекаю відправника...")
+        self._log(t("relay_waiting_sender"))
 
         # ── 2. Key exchange ───────────────────────────────────────
         self._crypto, peer_token = _do_key_exchange(
@@ -976,7 +958,7 @@ class VPSRelayReceiver:
         self._reconnect_token = new_token
 
         # ── 4. Receive file ───────────────────────────────────────
-        self._log("⏳ Чекаю метадані від відправника...")
+        self._log(t("relay_waiting_meta"))
         self._ws.settimeout(120)
 
         file_name:      Optional[str]  = None
@@ -1061,25 +1043,24 @@ class VPSRelayReceiver:
                             or file_name in (".", "..")
                             or "\x00" in file_name
                         ):
-                            self._log("❌ Небезпечне ім'я файлу від відправника")
+                            self._log(t("relay_unsafe_filename"))
                             return None
                         # Defense-in-depth: verify resolved path stays in save_dir
                         _resolved = (self._save_dir / file_name).resolve()
                         if not str(_resolved).startswith(
                             str(self._save_dir.resolve())
                         ):
-                            self._log("❌ Небезпечне ім'я файлу (path traversal)")
+                            self._log(t("relay_path_traversal"))
                             return None
 
                         # ── Security: validate file size ──────────────────
                         if not isinstance(file_size, int) or file_size <= 0:
-                            self._log("❌ Невірний розмір файлу")
+                            self._log(t("relay_invalid_filesize"))
                             return None
                         if file_size > VPS_MAX_FILE_SIZE:
-                            self._log(
-                                f"❌ Розмір файлу ({file_size / (1024**3):.1f} ГБ) "
-                                f"перевищує ліміт ({VPS_MAX_FILE_SIZE / (1024**3):.0f} ГБ)"
-                            )
+                            self._log(t("relay_file_too_large",
+                                size=f"{file_size / (1024**3):.1f}",
+                                limit=f"{VPS_MAX_FILE_SIZE / (1024**3):.0f}"))
                             return None
 
                         # ── Security: validate chunk_size / total_chunks ──
@@ -1122,17 +1103,15 @@ class VPSRelayReceiver:
                             try:
                                 out_file = open(temp_path, "r+b")
                             except Exception as exc:
-                                self._log(f"❌ Не вдалось відкрити .part: {exc}")
+                                self._log(t("relay_part_open_error", error=str(exc)))
                                 is_resume = False
                                 received_seqs = set()
                                 bytes_received = 0
 
                             if is_resume:
-                                self._log(
-                                    f"🔄 Відновлення: знайдено {len(received_seqs)}/"
-                                    f"{total_chunks} чанків "
-                                    f"({bytes_received / (1024**2):.1f} МБ)"
-                                )
+                                self._log(t("relay_resume_found",
+                                    received=len(received_seqs), total=total_chunks,
+                                    mb=f"{bytes_received / (1024**2):.1f}"))
 
                         if not is_resume:
                             received_seqs = set()
@@ -1145,7 +1124,7 @@ class VPSRelayReceiver:
                                     out_file.flush()
                                     out_file.seek(0)
                             except Exception as exc:
-                                self._log(f"❌ Не вдалось створити файл: {exc}")
+                                self._log(t("relay_file_create_error", error=str(exc)))
                                 return None
 
                         writer_thread = threading.Thread(
@@ -1153,19 +1132,14 @@ class VPSRelayReceiver:
                         )
                         writer_thread.start()
 
-                        size_str = (
-                            f"{file_size / (1024**3):.1f} ГБ"
-                            if file_size >= 1024**3
-                            else f"{file_size / (1024**2):.1f} МБ"
-                        )
+                        from .gui import _human_size
+                        size_str = _human_size(file_size)
                         if is_resume:
                             pct = bytes_received / file_size * 100 if file_size else 0
-                            self._log(
-                                f"📥 Відновлюю: {file_name} ({size_str}) — "
-                                f"{pct:.0f}% вже є"
-                            )
+                            self._log(t("relay_receiving_resume",
+                                filename=file_name, size=size_str, pct=f"{pct:.0f}"))
                         else:
-                            self._log(f"📥 Отримую: {file_name} ({size_str})")
+                            self._log(t("relay_receiving", filename=file_name, size=size_str))
 
                         ack_msg: dict = {"type": "relay_meta_ack"}
                         if is_resume and received_seqs:
@@ -1200,9 +1174,7 @@ class VPSRelayReceiver:
                                     "type":    "relay_retransmit",
                                     "missing": batch,
                                 }).encode())
-                            self._log(
-                                f"🔄 Запитую ретрансміт {len(missing)} чанків..."
-                            )
+                            self._log(t("relay_request_retransmit", count=len(missing)))
 
                         else:
                             write_queue.put(None)
@@ -1215,7 +1187,7 @@ class VPSRelayReceiver:
                             except Exception:
                                 pass
 
-                            self._log("🔍 Перевірка SHA-256...")
+                            self._log(t("relay_verifying_sha"))
                             verified = _sha256_file(temp_path) == file_hash
 
                             self._send_ctl(json.dumps({
@@ -1231,13 +1203,11 @@ class VPSRelayReceiver:
                                 temp_path.rename(save_path)
                                 elapsed = time.monotonic() - t0
                                 avg = file_size / elapsed if elapsed > 0 else 0
-                                self._log(
-                                    f"✅ Збережено: {save_path.name} "
-                                    f"({avg / (1024*1024):.1f} МБ/с)"
-                                )
+                                self._log(t("relay_saved",
+                                    filename=save_path.name, speed=f"{avg / (1024*1024):.1f}"))
                                 return save_path
                             else:
-                                self._log("❌ Хеш не збігається!")
+                                self._log(t("relay_hash_mismatch_recv"))
                                 _delete_manifest(self._save_dir, file_name)
                                 temp_path.unlink(missing_ok=True)
                                 return None
@@ -1286,7 +1256,7 @@ class VPSRelayReceiver:
                         last_prog = now
 
         except Exception as exc:
-            self._log(f"❌ Помилка: {exc}")
+            self._log(t("transfer_error_generic", error=str(exc)))
             log.exception("VPSRelayReceiver error")
             if file_name and received_seqs:
                 self._retryable = True
@@ -1308,10 +1278,8 @@ class VPSRelayReceiver:
                 file_name and transfer_id and received_seqs
                 and len(received_seqs) < total_chunks
             ):
-                self._log(
-                    f"💾 Збережено прогрес: {len(received_seqs)}/{total_chunks} "
-                    f"чанків — можна відновити"
-                )
+                self._log(t("relay_progress_saved",
+                    received=len(received_seqs), total=total_chunks))
                 _save_manifest(
                     _manifest_path(self._save_dir, file_name),
                     transfer_id, file_name, file_size,

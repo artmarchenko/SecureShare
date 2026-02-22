@@ -33,6 +33,7 @@ from .config import (
     APP_VERSION,
     DONATE_URL,
     GITHUB_URL,
+    HOMEPAGE_URL,
     SESSION_CODE_LENGTH,
     VPS_MAX_FILE_SIZE,
     VPS_RELAY_URL,
@@ -44,6 +45,7 @@ from .updater import (
     install_and_restart,
 )
 from .telemetry import report_crash, report_session
+from .i18n import t, init as i18n_init, set_language, get_language, available_languages
 
 log = logging.getLogger(__name__)
 
@@ -52,15 +54,16 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 # ── Startup tips (shown randomly on launch) ───────────────────────
-_STARTUP_TIPS = [
-    "❤️  SecureShare — безкоштовний open-source проєкт. Підтримайте розробку: {donate_url}",
-    "🔒  Ваші файли захищені AES-256-GCM шифруванням. Сервер ніколи не бачить ваших даних.",
-    "🔄  При втраті з’єднання передача автоматично відновиться з місця зупинки.",
-    "⭐  Подобається SecureShare? Поставте зірку на GitHub: {github_url}",
-    "🚀  Порада: для кількох файлів спакуйте їх в один архів (ZIP/RAR).",
-    "🛡️  Завжди перевіряйте код верифікації — це захист від атак посередника (MITM).",
-    "☕  Розробка та сервер коштують гроші. Пригостіть автора кавою: {donate_url}",
-]
+def _startup_tips() -> list[str]:
+    return [
+        t("startup_tip_donate", donate_url=DONATE_URL),
+        t("startup_tip_encryption"),
+        t("startup_tip_reconnect"),
+        t("startup_tip_github", github_url=GITHUB_URL),
+        t("startup_tip_archive"),
+        t("startup_tip_verify"),
+        t("startup_tip_coffee", donate_url=DONATE_URL),
+    ]
 
 
 def _generate_code() -> str:
@@ -70,15 +73,15 @@ def _generate_code() -> str:
 
 
 def _human_size(b: int | float) -> str:
-    for unit in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+    for key in ("unit_b", "unit_kb", "unit_mb", "unit_gb", "unit_tb"):
         if abs(b) < 1024:
-            return f"{b:.1f} {unit}"
+            return f"{b:.1f} {t(key)}"
         b /= 1024
-    return f"{b:.1f} ПБ"
+    return f"{b:.1f} {t('unit_pb')}"
 
 
 def _human_speed(bps: float) -> str:
-    return f"{_human_size(bps)}/с"
+    return f"{_human_size(bps)}{t('speed_suffix')}"
 
 
 def _human_eta(seconds: float) -> str:
@@ -87,10 +90,10 @@ def _human_eta(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     if h:
-        return f"{h}г {m:02d}хв"
+        return t("eta_hours", h=h, m=m)
     if m:
-        return f"{m}хв {s:02d}с"
-    return f"{s}с"
+        return t("eta_minutes", m=m, s=s)
+    return t("eta_seconds", s=s)
 
 
 def _timestamp() -> str:
@@ -116,16 +119,18 @@ class App(ctk.CTk):
     STATE_DONE = "done"
     STATE_ERROR = "error"
 
-    _STATE_LABELS = {
-        STATE_IDLE:         ("⚪  Готовий", "gray"),
-        STATE_CONNECTING:   ("🟡  Підключення...", "#f39c12"),
-        STATE_WAITING:      ("🟡  Очікування партнера...", "#f39c12"),
-        STATE_KEY_EXCHANGE: ("🟡  Обмін ключами...", "#f39c12"),
-        STATE_VERIFYING:    ("🟠  Верифікація...", "#e67e22"),
-        STATE_TRANSFERRING: ("🟢  Передача...", "#2ecc71"),
-        STATE_DONE:         ("🟢  Завершено ✓", "#27ae60"),
-        STATE_ERROR:        ("🔴  Помилка", "#e74c3c"),
-    }
+    @staticmethod
+    def _get_state_labels():
+        return {
+            App.STATE_IDLE:         (t("state_idle"), "gray"),
+            App.STATE_CONNECTING:   (t("state_connecting"), "#f39c12"),
+            App.STATE_WAITING:      (t("state_waiting"), "#f39c12"),
+            App.STATE_KEY_EXCHANGE: (t("state_key_exchange"), "#f39c12"),
+            App.STATE_VERIFYING:    (t("state_verifying"), "#e67e22"),
+            App.STATE_TRANSFERRING: (t("state_transferring"), "#2ecc71"),
+            App.STATE_DONE:         (t("state_done"), "#27ae60"),
+            App.STATE_ERROR:        (t("state_error"), "#e74c3c"),
+        }
 
     def __init__(self):
         super().__init__()
@@ -143,6 +148,7 @@ class App(ctk.CTk):
         self._cancel_flag = False
         self._current_transfer = None   # VPSRelaySender / VPSRelayReceiver
 
+        i18n_init()
         self._build_ui()
 
         # ── Auto-check for updates (silent, background) ─────────
@@ -209,35 +215,64 @@ class App(ctk.CTk):
             corner_radius=6,
         )
 
-        ctk.CTkButton(
-            toolbar, text="🔄 Оновити", width=100,
+        self._tb_update_btn = ctk.CTkButton(
+            toolbar, text=t("toolbar_update"), width=100,
             command=self._check_updates_manual, **_tb_kw,
-        ).pack(side="left", padx=(6, 2), pady=4)
+        )
+        self._tb_update_btn.pack(side="left", padx=(6, 2), pady=4)
 
-        ctk.CTkButton(
-            toolbar, text="❤️ Підтримати", width=110,
+        self._tb_donate_btn = ctk.CTkButton(
+            toolbar, text=t("toolbar_donate"), width=110,
             command=self._open_donate,
             height=28, font=_tb_font,
             fg_color="#5c1a2a", hover_color="#7a2840",
             border_width=0, corner_radius=6,
-        ).pack(side="left", padx=2, pady=4)
+        )
+        self._tb_donate_btn.pack(side="left", padx=2, pady=4)
 
-        ctk.CTkButton(
-            toolbar, text="🔍 Діагностика", width=116,
+        self._tb_diag_btn = ctk.CTkButton(
+            toolbar, text=t("toolbar_diagnostics"), width=116,
             command=self._run_diagnostics, **_tb_kw,
-        ).pack(side="left", padx=2, pady=4)
+        )
+        self._tb_diag_btn.pack(side="left", padx=2, pady=4)
 
-        ctk.CTkButton(
-            toolbar, text="❓ Довідка", width=100,
+        self._tb_help_btn = ctk.CTkButton(
+            toolbar, text=t("toolbar_help"), width=100,
             command=self._show_help, **_tb_kw,
-        ).pack(side="left", padx=2, pady=4)
+        )
+        self._tb_help_btn.pack(side="left", padx=2, pady=4)
+
+        # Language selector
+        _lang_map = {"uk": "UA", "en": "EN", "de": "DE"}
+        _lang_codes = available_languages()
+        _lang_labels = [_lang_map.get(c, c.upper()) for c in _lang_codes]
+        _cur_label = _lang_map.get(get_language(), "UA")
+
+        self._lang_menu = ctk.CTkOptionMenu(
+            toolbar,
+            values=_lang_labels,
+            width=56,
+            height=28,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#333333",
+            button_color="#444444",
+            button_hover_color="#555555",
+            dropdown_fg_color="#2a2a2a",
+            command=self._on_language_change,
+        )
+        self._lang_menu.set(_cur_label)
+        self._lang_menu.pack(side="right", padx=(2, 6), pady=4)
+        self._lang_codes = _lang_codes
+        self._lang_labels = _lang_labels
 
         # Tab view
         self.tabs = ctk.CTkTabview(self, width=self.WIDTH - 40)
         self.tabs.pack(fill="both", expand=True, padx=20, pady=(6, 0))
 
-        self._build_send_tab(self.tabs.add("📤  Надіслати"))
-        self._build_recv_tab(self.tabs.add("📥  Отримати"))
+        self._tab_send_name = t("tab_send")
+        self._tab_recv_name = t("tab_receive")
+        self._build_send_tab(self.tabs.add(self._tab_send_name))
+        self._build_recv_tab(self.tabs.add(self._tab_recv_name))
 
         # ── Status / progress area (shared) ───────────────────────
         status_frame = ctk.CTkFrame(self)
@@ -246,7 +281,7 @@ class App(ctk.CTk):
         # Connection status indicator
         self.status_indicator = ctk.CTkLabel(
             status_frame,
-            text="⚪  Готовий",
+            text=t("state_idle"),
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="gray",
         )
@@ -278,9 +313,9 @@ class App(ctk.CTk):
         btn_row = ctk.CTkFrame(status_frame, fg_color="transparent")
         btn_row.pack(fill="x", padx=12, pady=(0, 8))
 
-        ctk.CTkButton(
+        self._copy_log_btn = ctk.CTkButton(
             btn_row,
-            text="📋 Копіювати лог",
+            text=t("btn_copy_log"),
             width=130,
             height=28,
             font=ctk.CTkFont(size=11),
@@ -289,11 +324,12 @@ class App(ctk.CTk):
             border_width=1,
             border_color="#555555",
             command=self._copy_log,
-        ).pack(side="left", padx=(0, 6))
+        )
+        self._copy_log_btn.pack(side="left", padx=(0, 6))
 
-        ctk.CTkButton(
+        self._save_log_btn = ctk.CTkButton(
             btn_row,
-            text="💾 Зберегти лог",
+            text=t("btn_save_log"),
             width=130,
             height=28,
             font=ctk.CTkFont(size=11),
@@ -302,12 +338,13 @@ class App(ctk.CTk):
             border_width=1,
             border_color="#555555",
             command=self._save_log,
-        ).pack(side="left")
+        )
+        self._save_log_btn.pack(side="left")
 
         # Cancel button — right-aligned in the same row
         self.cancel_btn = ctk.CTkButton(
             btn_row,
-            text="⏹ Скасувати",
+            text=t("btn_cancel"),
             width=130,
             height=28,
             fg_color="#c0392b",
@@ -318,38 +355,98 @@ class App(ctk.CTk):
         self.cancel_btn.pack(side="right")
 
         # Copyright footer
-        ctk.CTkLabel(
+        self._copyright_lbl = ctk.CTkLabel(
             self,
-            text="© 2026 Artem Marchenko. MIT License",
+            text=t("copyright"),
             font=ctk.CTkFont(size=10),
             text_color="gray",
-        ).pack(pady=(0, 4))
+        )
+        self._copyright_lbl.pack(pady=(0, 4))
+
+    def _on_language_change(self, label: str):
+        """Handle language selection from the toolbar dropdown."""
+        idx = self._lang_labels.index(label) if label in self._lang_labels else 0
+        code = self._lang_codes[idx]
+        if code != get_language():
+            set_language(code)
+            self._refresh_ui_texts()
+
+    def _refresh_ui_texts(self):
+        """Refresh all UI texts after language change (live switch)."""
+        # Toolbar buttons
+        self._tb_update_btn.configure(text=t("toolbar_update"))
+        self._tb_donate_btn.configure(text=t("toolbar_donate"))
+        self._tb_diag_btn.configure(text=t("toolbar_diagnostics"))
+        self._tb_help_btn.configure(text=t("toolbar_help"))
+
+        # Tab names — update the segmented button text
+        try:
+            seg = self.tabs._segmented_button
+            for val, btn in seg._buttons_dict.items():
+                if val == self._tab_send_name:
+                    btn.configure(text=t("tab_send"))
+                elif val == self._tab_recv_name:
+                    btn.configure(text=t("tab_receive"))
+        except Exception:
+            pass  # CTkTabview internals changed — tabs will update on restart
+
+        # Status indicator — refresh only if idle
+        current_text = self.status_indicator.cget("text")
+        idle_label, _ = self._get_state_labels().get(self.STATE_IDLE, ("", ""))
+        # Only refresh if we're in idle state (don't overwrite active status)
+        if not hasattr(self, "_current_state") or self._current_state == self.STATE_IDLE:
+            self.status_indicator.configure(text=t("state_idle"))
+
+        # Bottom buttons
+        self._copy_log_btn.configure(text=t("btn_copy_log"))
+        self._save_log_btn.configure(text=t("btn_save_log"))
+        self.cancel_btn.configure(text=t("btn_cancel"))
+
+        # Copyright
+        self._copyright_lbl.configure(text=t("copyright"))
+
+        # Send tab
+        self._send_choose_lbl.configure(text=t("send_choose_file"))
+        self.file_entry.configure(placeholder_text=t("send_file_placeholder"))
+        self._send_browse_btn.configure(text=t("btn_browse"))
+        self._send_session_lbl.configure(text=t("send_session_code"))
+        self._send_hint_lbl.configure(text=t("send_code_hint"))
+        self.send_btn.configure(text=t("btn_send"))
+
+        # Receive tab
+        self._recv_enter_lbl.configure(text=t("recv_enter_code"))
+        self._recv_paste_btn.configure(text=t("btn_paste_code"))
+        self._recv_save_lbl.configure(text=t("recv_save_to"))
+        self._recv_browse_btn.configure(text=t("btn_browse"))
+        self.recv_btn.configure(text=t("btn_receive"))
 
     # ── Send tab ───────────────────────────────────────────────────
 
     def _build_send_tab(self, tab):
-        ctk.CTkLabel(
+        self._send_choose_lbl = ctk.CTkLabel(
             tab,
-            text="Оберіть файл для надсилання:",
+            text=t("send_choose_file"),
             font=ctk.CTkFont(size=13),
-        ).pack(anchor="w", padx=10, pady=(6, 2))
+        )
+        self._send_choose_lbl.pack(anchor="w", padx=10, pady=(6, 2))
 
         file_frame = ctk.CTkFrame(tab, fg_color="transparent")
         file_frame.pack(fill="x", padx=10, pady=2)
 
         self.file_entry = ctk.CTkEntry(
             file_frame,
-            placeholder_text="Шлях до файлу...",
+            placeholder_text=t("send_file_placeholder"),
             state="readonly",
         )
         self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        ctk.CTkButton(
+        self._send_browse_btn = ctk.CTkButton(
             file_frame,
-            text="📁 Огляд",
+            text=t("btn_browse"),
             width=100,
             command=self._browse_file,
-        ).pack(side="right")
+        )
+        self._send_browse_btn.pack(side="right")
 
         # File info label (size + warning)
         self.file_info_label = ctk.CTkLabel(
@@ -373,18 +470,19 @@ class App(ctk.CTk):
         code_frame = ctk.CTkFrame(tab)
         code_frame.pack(fill="x", padx=10, pady=(6, 2))
 
-        ctk.CTkLabel(
+        self._send_session_lbl = ctk.CTkLabel(
             code_frame,
-            text="Код сесії:",
+            text=t("send_session_code"),
             font=ctk.CTkFont(size=13),
-        ).pack(anchor="w", padx=10, pady=(8, 0))
+        )
+        self._send_session_lbl.pack(anchor="w", padx=10, pady=(8, 0))
 
         code_inner = ctk.CTkFrame(code_frame, fg_color="transparent")
         code_inner.pack(fill="x", padx=10, pady=(4, 4))
 
         self.send_code_label = ctk.CTkLabel(
             code_inner,
-            text="— — — —",
+            text=t("send_code_placeholder"),
             font=ctk.CTkFont(family="Consolas", size=24, weight="bold"),
             text_color="#3498db",
         )
@@ -403,16 +501,17 @@ class App(ctk.CTk):
         )
         self.copy_code_btn.pack(side="left")
 
-        ctk.CTkLabel(
+        self._send_hint_lbl = ctk.CTkLabel(
             code_frame,
-            text="Повідомте цей код отримувачу",
+            text=t("send_code_hint"),
             font=ctk.CTkFont(size=11),
             text_color="gray",
-        ).pack(padx=10, pady=(0, 8))
+        )
+        self._send_hint_lbl.pack(padx=10, pady=(0, 8))
 
         self.send_btn = ctk.CTkButton(
             tab,
-            text="🚀 Надіслати",
+            text=t("btn_send"),
             font=ctk.CTkFont(size=14, weight="bold"),
             height=38,
             command=self._on_send,
@@ -422,11 +521,12 @@ class App(ctk.CTk):
     # ── Receive tab ────────────────────────────────────────────────
 
     def _build_recv_tab(self, tab):
-        ctk.CTkLabel(
+        self._recv_enter_lbl = ctk.CTkLabel(
             tab,
-            text="Введіть код сесії від відправника:",
+            text=t("recv_enter_code"),
             font=ctk.CTkFont(size=13),
-        ).pack(anchor="w", padx=10, pady=(6, 2))
+        )
+        self._recv_enter_lbl.pack(anchor="w", padx=10, pady=(6, 2))
 
         self.recv_code_entry = ctk.CTkEntry(
             tab,
@@ -440,9 +540,9 @@ class App(ctk.CTk):
         # Paste button next to entry for convenience
         paste_frame = ctk.CTkFrame(tab, fg_color="transparent")
         paste_frame.pack(fill="x", padx=10, pady=(2, 0))
-        ctk.CTkButton(
+        self._recv_paste_btn = ctk.CTkButton(
             paste_frame,
-            text="📋 Вставити код",
+            text=t("btn_paste_code"),
             width=120,
             height=26,
             font=ctk.CTkFont(size=11),
@@ -451,14 +551,16 @@ class App(ctk.CTk):
             border_width=1,
             border_color="#555555",
             command=self._paste_session_code,
-        ).pack(side="left")
+        )
+        self._recv_paste_btn.pack(side="left")
 
         # Save directory
-        ctk.CTkLabel(
+        self._recv_save_lbl = ctk.CTkLabel(
             tab,
-            text="Зберегти в:",
+            text=t("recv_save_to"),
             font=ctk.CTkFont(size=13),
-        ).pack(anchor="w", padx=10, pady=(8, 2))
+        )
+        self._recv_save_lbl.pack(anchor="w", padx=10, pady=(8, 2))
 
         dir_frame = ctk.CTkFrame(tab, fg_color="transparent")
         dir_frame.pack(fill="x", padx=10, pady=2)
@@ -475,16 +577,17 @@ class App(ctk.CTk):
         self.save_dir_entry.insert(0, self._save_dir)
         self.save_dir_entry.configure(state="readonly")
 
-        ctk.CTkButton(
+        self._recv_browse_btn = ctk.CTkButton(
             dir_frame,
-            text="📁 Огляд",
+            text=t("btn_browse"),
             width=100,
             command=self._browse_save_dir,
-        ).pack(side="right")
+        )
+        self._recv_browse_btn.pack(side="right")
 
         self.recv_btn = ctk.CTkButton(
             tab,
-            text="📥 Отримати",
+            text=t("btn_receive"),
             font=ctk.CTkFont(size=14, weight="bold"),
             height=38,
             command=self._on_receive,
@@ -494,7 +597,7 @@ class App(ctk.CTk):
     # ── UI helpers ─────────────────────────────────────────────────
 
     def _browse_file(self):
-        path = filedialog.askopenfilename(title="Оберіть файл")
+        path = filedialog.askopenfilename(title=t("dialog_choose_file"))
         if path:
             self.file_entry.configure(state="normal")
             self.file_entry.delete(0, "end")
@@ -512,10 +615,7 @@ class App(ctk.CTk):
             )
             if size > VPS_MAX_FILE_SIZE:
                 self.size_warning_label.configure(
-                    text=(
-                        f"⚠️ Файл перевищує ліміт {_human_size(VPS_MAX_FILE_SIZE)}. "
-                        "Передача може бути перервана сервером."
-                    )
+                    text=t("file_size_warning", max_size=_human_size(VPS_MAX_FILE_SIZE))
                 )
             else:
                 self.size_warning_label.configure(text="")
@@ -524,7 +624,7 @@ class App(ctk.CTk):
             self.size_warning_label.configure(text="")
 
     def _browse_save_dir(self):
-        path = filedialog.askdirectory(title="Оберіть папку для збереження")
+        path = filedialog.askdirectory(title=t("dialog_choose_save_dir"))
         if path:
             self._save_dir = path
             self.save_dir_entry.configure(state="normal")
@@ -561,7 +661,7 @@ class App(ctk.CTk):
         if text:
             self.clipboard_clear()
             self.clipboard_append(text)
-            self._log("📋 Лог скопійовано в буфер обміну")
+            self._log(t("log_copied"))
 
     def _save_log(self):
         """Save the status log to a text file."""
@@ -572,7 +672,7 @@ class App(ctk.CTk):
             return
 
         path = filedialog.asksaveasfilename(
-            title="Зберегти лог",
+            title=t("dialog_save_log"),
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
             initialfile=f"secureshare_log_{datetime.datetime.now():%Y%m%d_%H%M%S}.txt",
@@ -586,9 +686,9 @@ class App(ctk.CTk):
                 )
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(header + text + "\n")
-                self._log(f"💾 Лог збережено: {Path(path).name}")
+                self._log(t("log_saved", filename=Path(path).name))
             except Exception as exc:
-                self._log(f"❌ Помилка збереження логу: {exc}")
+                self._log(t("log_save_error", error=str(exc)))
 
     # ── Diagnostics ──────────────────────────────────────────────────
 
@@ -603,7 +703,7 @@ class App(ctk.CTk):
                 pass
 
         win = ctk.CTkToplevel(self)
-        win.title(f"{APP_NAME} — Діагностика")
+        win.title(f"{APP_NAME} — {t('diag_title')}")
         win.geometry("480x420")
         win.resizable(False, False)
         win.transient(self)
@@ -621,7 +721,7 @@ class App(ctk.CTk):
         header.pack(fill="x")
         ctk.CTkLabel(
             header,
-            text="🔍  Діагностика системи",
+            text=t("diag_header"),
             font=ctk.CTkFont(size=17, weight="bold"),
             text_color="white",
         ).pack(padx=20, pady=12)
@@ -631,11 +731,11 @@ class App(ctk.CTk):
         results_frame.pack(fill="both", expand=True, padx=20, pady=(12, 6))
 
         checks = [
-            ("internet",  "🌐  Інтернет-з'єднання"),
-            ("dns",       "🔗  DNS relay-сервера"),
-            ("tls",       "🔒  TLS/SSL сертифікат"),
-            ("websocket", "⚡  WebSocket з'єднання"),
-            ("latency",   "📊  Латентність (пінг)"),
+            ("internet",  t("diag_internet")),
+            ("dns",       t("diag_dns")),
+            ("tls",       t("diag_tls")),
+            ("websocket", t("diag_websocket")),
+            ("latency",   t("diag_latency")),
         ]
 
         # Create result rows
@@ -652,7 +752,7 @@ class App(ctk.CTk):
             ).grid(row=0, column=0, padx=12, pady=10, sticky="w")
 
             status_label = ctk.CTkLabel(
-                row, text="⏳ Перевіряю...",
+                row, text=t("diag_checking"),
                 font=ctk.CTkFont(size=12),
                 text_color="#f39c12",
                 anchor="e",
@@ -669,7 +769,7 @@ class App(ctk.CTk):
 
         # Close button
         close_btn = ctk.CTkButton(
-            win, text="Закрити", width=140, height=32,
+            win, text=t("btn_close"), width=140, height=32,
             fg_color="#1a3a5c", hover_color="#2471a3",
             command=_on_close,
         )
@@ -704,16 +804,16 @@ class App(ctk.CTk):
             try:
                 socket.setdefaulttimeout(5)
                 socket.create_connection(("8.8.8.8", 53), timeout=5).close()
-                _update_row("internet", True, "Підключено")
+                _update_row("internet", True, t("diag_connected"))
                 passed += 1
             except Exception:
-                _update_row("internet", False, "Немає з'єднання")
+                _update_row("internet", False, t("diag_no_connection"))
                 # If no internet, mark all remaining as failed
                 for key in ["dns", "tls", "websocket", "latency"]:
-                    _update_row(key, False, "Пропущено (немає інтернету)",
+                    _update_row(key, False, t("diag_skipped_no_internet"),
                                 "#888888")
                 win.after(0, lambda: summary_label.configure(
-                    text=f"Результат: {passed}/{total} перевірок пройдено",
+                    text=t("diag_result", passed=passed, total=total),
                     text_color="#e74c3c",
                 ))
                 return
@@ -723,15 +823,15 @@ class App(ctk.CTk):
                 t0 = time.perf_counter()
                 ip = socket.gethostbyname(host)
                 dns_ms = (time.perf_counter() - t0) * 1000
-                _update_row("dns", True, f"{ip}  ({dns_ms:.0f} мс)")
+                _update_row("dns", True, f"{ip} ({dns_ms:.0f} ms)")
                 passed += 1
             except Exception:
-                _update_row("dns", False, f"Не вдалося резолвити {host}")
+                _update_row("dns", False, t("diag_dns_fail", host=host))
                 for key in ["tls", "websocket", "latency"]:
-                    _update_row(key, False, "Пропущено (DNS помилка)",
+                    _update_row(key, False, t("diag_skipped_dns_error"),
                                 "#888888")
                 win.after(0, lambda: summary_label.configure(
-                    text=f"Результат: {passed}/{total} перевірок пройдено",
+                    text=t("diag_result", passed=passed, total=total),
                     text_color="#e74c3c",
                 ))
                 return
@@ -750,12 +850,12 @@ class App(ctk.CTk):
                         )
                         not_after = cert.get("notAfter", "?")
                         _update_row("tls", True,
-                                    f"{issuer} (до {not_after})")
+                                    f"{issuer} ({not_after})")
                         passed += 1
             except ssl.SSLCertVerificationError:
-                _update_row("tls", False, "Невалідний сертифікат")
+                _update_row("tls", False, t("diag_tls_invalid"))
             except Exception as exc:
-                _update_row("tls", False, f"Помилка: {type(exc).__name__}")
+                _update_row("tls", False, t("diag_tls_error", error=type(exc).__name__))
 
             # 4. WebSocket connection
             try:
@@ -768,7 +868,7 @@ class App(ctk.CTk):
                 )
                 ws_ms = (time.perf_counter() - t0) * 1000
                 ws.close()
-                _update_row("websocket", True, f"OK  ({ws_ms:.0f} мс)")
+                _update_row("websocket", True, f"OK ({ws_ms:.0f} ms)")
                 passed += 1
             except Exception:
                 # Try plain HTTPS health check as fallback
@@ -782,14 +882,14 @@ class App(ctk.CTk):
                     ws_ms = (time.perf_counter() - t0) * 1000
                     if resp.status == 200:
                         _update_row("websocket", True,
-                                    f"OK (HTTP, {ws_ms:.0f} мс)")
+                                    f"OK (HTTP, {ws_ms:.0f} ms)")
                         passed += 1
                     else:
                         _update_row("websocket", False,
                                     f"HTTP {resp.status}")
                 except Exception:
                     _update_row("websocket", False,
-                                "Не вдалося підключитися")
+                                t("diag_ws_fail"))
 
             # 5. Latency (3 TCP pings, take median)
             try:
@@ -804,29 +904,29 @@ class App(ctk.CTk):
                 pings.sort()
                 median = pings[len(pings) // 2]
                 if median < 100:
-                    quality = "Відмінно"
+                    quality = t("diag_quality_excellent")
                     clr = "#2ecc71"
                 elif median < 250:
-                    quality = "Добре"
+                    quality = t("diag_quality_good")
                     clr = "#f1c40f"
                 else:
-                    quality = "Повільно"
+                    quality = t("diag_quality_slow")
                     clr = "#e67e22"
                 _update_row("latency", True,
-                            f"{median:.0f} мс ({quality})", clr)
+                            f"{median:.0f} ms ({quality})", clr)
                 passed += 1
             except Exception:
-                _update_row("latency", False, "Не вдалося виміряти")
+                _update_row("latency", False, t("diag_latency_fail"))
 
             # Summary
             if passed == total:
-                s_text = f"✅  Все працює! ({passed}/{total})"
+                s_text = t("diag_all_ok", passed=passed, total=total)
                 s_color = "#2ecc71"
             elif passed >= 3:
-                s_text = f"⚠️  Частково ({passed}/{total})"
+                s_text = t("diag_partial", passed=passed, total=total)
                 s_color = "#f39c12"
             else:
-                s_text = f"❌  Проблеми ({passed}/{total})"
+                s_text = t("diag_problems", passed=passed, total=total)
                 s_color = "#e74c3c"
 
             win.after(0, lambda: summary_label.configure(
@@ -849,7 +949,7 @@ class App(ctk.CTk):
                 pass
 
         win = ctk.CTkToplevel(self)
-        win.title(f"{APP_NAME} — Інструкція")
+        win.title(f"{APP_NAME} — {t('help_title')}")
         win.geometry("520x560")
         win.resizable(True, True)
         win.transient(self)
@@ -867,7 +967,7 @@ class App(ctk.CTk):
         header_frame.pack(fill="x")
         ctk.CTkLabel(
             header_frame,
-            text="📖  Як користуватися SecureShare",
+            text=t("help_header"),
             font=ctk.CTkFont(size=18, weight="bold"),
             text_color="white",
         ).pack(padx=20, pady=14)
@@ -877,110 +977,23 @@ class App(ctk.CTk):
         scroll.pack(fill="both", expand=True, padx=12, pady=(8, 6))
 
         # Section color scheme: (title, body, card_color, title_color, accent_bar)
+        max_gb = VPS_MAX_FILE_SIZE // (1024**3)
         help_sections = [
-            (
-                "📤  Надсилання файлу",
-                "1.  Відкрийте вкладку «Надіслати»\n"
-                "2.  Натисніть «Огляд» та оберіть файл\n"
-                "3.  Натисніть «Надіслати» — програма згенерує код сесії\n"
-                "4.  Передайте цей код отримувачу (кнопка 📋)\n"
-                "5.  Дочекайтесь підключення отримувача\n"
-                "6.  Підтвердіть код верифікації\n"
-                "7.  Передача розпочнеться автоматично",
-                "#1a3a2a",  # card bg
-                "#2ecc71",  # title color (green)
-            ),
-            (
-                "📥  Отримання файлу",
-                "1.  Відкрийте вкладку «Отримати»\n"
-                "2.  Введіть код сесії від відправника\n"
-                "3.  Оберіть папку збереження\n"
-                "4.  Натисніть «Отримати»\n"
-                "5.  Підтвердіть код верифікації\n"
-                "6.  Файл збережеться у вказану папку",
-                "#1a2a3a",  # card bg
-                "#3498db",  # title color (blue)
-            ),
-            (
-                "🔑  Код верифікації",
-                "Після підключення обидва пристрої покажуть\n"
-                "однаковий 8-символьний код (XXXX-XXXX).\n\n"
-                "✅ Коди збігаються → натисніть «Так»\n"
-                "❌ Коди різні → натисніть «Ні» і спробуйте ще раз\n\n"
-                "Це захищає від атак посередника (MITM).",
-                "#2a2a1a",  # card bg
-                "#f1c40f",  # title color (yellow)
-            ),
-            (
-                "🔒  Безпека",
-                "•  Шифрування: AES-256-GCM (наскрізне)\n"
-                "•  Обмін ключами: X25519 (Diffie-Hellman)\n"
-                "•  Сервер НЕ бачить ваших даних\n"
-                "•  Код сесії одноразовий",
-                "#1a1a2a",  # card bg
-                "#9b59b6",  # title color (purple)
-            ),
-            (
-                "⚠️  Обмеження",
-                f"•  Максимальний розмір: {VPS_MAX_FILE_SIZE // (1024**3)} ГБ на сесію\n"
-                "•  Один файл за сесію (для кількох → архів)\n"
-                "•  Потрібен інтернет на обох пристроях\n"
-                "•  Для великих файлів — розбийте архіватором",
-                "#2a1a1a",  # card bg
-                "#e74c3c",  # title color (red)
-            ),
-            (
-                "🔄  Авто-реконнект і відновлення",
-                "При втраті з'єднання під час передачі\n"
-                "програма автоматично перепідключається\n"
-                "(до 5 спроб: 5с, 10с, 20с, 40с, 60с) і продовжує з місця зупинки.\n\n"
-                "Верифікація при реконнекті пропускається —\n"
-                "програма пам'ятає сесію через токен.\n\n"
-                "Якщо реконнект не вдався:\n"
-                "1.  Відправник обирає ТОЙ САМИЙ файл\n"
-                "2.  Натискає «Надіслати» (новий код)\n"
-                "3.  Отримувач вводить новий код\n"
-                "4.  Передача продовжиться (resume)\n\n"
-                "⏱ Прогрес зберігається 7 днів.",
-                "#1a2a3a",  # card bg
-                "#e67e22",  # title color (orange)
-            ),
-            (
-                "🛠  Вирішення проблем",
-                "•  Немає з'єднання → перевірте інтернет\n"
-                "•  Передача перервалась → відновіть (див. вище)\n"
-                "•  Діагностика → «Копіювати лог» / «Зберегти лог»\n"
-                "•  Зупинити передачу → кнопка «Скасувати»",
-                "#1a2a2a",  # card bg
-                "#1abc9c",  # title color (teal)
-            ),
-            (
-                "🔄  Авто-оновлення",
-                "Програма автоматично перевіряє оновлення\n"
-                "при кожному запуску. Якщо є нова версія —\n"
-                "з'явиться діалог з описом змін.\n\n"
-                "•  🔄 Оновити зараз — завантажити та встановити\n"
-                "•  ⏩ Пропустити — ігнорувати цю версію\n"
-                "•  Пізніше — нагадати наступного разу\n\n"
-                "Оновлення перевіряється через SHA-256.\n"
-                "Кнопка 🔄 у шапці — перевірка вручну.",
-                "#1a2a2a",  # card bg
-                "#3498db",  # title color (blue)
-            ),
-            (
-                "❤️  Підтримка проєкту",
-                "SecureShare — безкоштовний open-source проєкт.\n"
-                "Розробка та сервер коштують грошей.\n\n"
-                "Кнопка ❤️ у шапці відкриває сторінку\n"
-                "підтримки на Ko-fi.\n\n"
-                "Навіть маленький донат допомагає тримати\n"
-                "relay-сервер онлайн та розвивати проєкт.",
-                "#2a1a2a",  # card bg
-                "#e91e63",  # title color (pink)
-            ),
+            (t("help_send_title"), t("help_send_body"), "#1a3a2a", "#2ecc71"),
+            (t("help_recv_title"), t("help_recv_body"), "#1a2a3a", "#3498db"),
+            (t("help_verify_title"), t("help_verify_body"), "#2a2a1a", "#f1c40f"),
+            (t("help_security_title"), t("help_security_body"), "#1a1a2a", "#9b59b6"),
+            (t("help_limits_title"), t("help_limits_body", max_gb=max_gb), "#2a1a1a", "#e74c3c"),
+            (t("help_reconnect_title"), t("help_reconnect_body"), "#1a2a3a", "#e67e22"),
+            (t("help_troubleshoot_title"), t("help_troubleshoot_body"), "#1a2a2a", "#1abc9c", HOMEPAGE_URL),
+            (t("help_autoupdate_title"), t("help_autoupdate_body"), "#1a2a2a", "#3498db"),
+            (t("help_donate_title"), t("help_donate_body"), "#2a1a2a", "#e91e63"),
         ]
 
-        for title, body, card_bg, title_color in help_sections:
+        for item in help_sections:
+            title, body, card_bg, title_color = item[:4]
+            link_url = item[4] if len(item) > 4 else None
+
             # Card container
             card = ctk.CTkFrame(scroll, fg_color=card_bg, corner_radius=8)
             card.pack(fill="x", padx=4, pady=4)
@@ -1003,12 +1016,28 @@ class App(ctk.CTk):
                 anchor="w",
                 justify="left",
                 wraplength=430,
-            ).pack(fill="x", padx=20, pady=(0, 10))
+            ).pack(fill="x", padx=20, pady=(0, 4 if link_url else 10))
+
+            # Clickable link (if provided)
+            if link_url:
+                _url = link_url  # capture for lambda
+                link_btn = ctk.CTkButton(
+                    card,
+                    text=link_url,
+                    font=ctk.CTkFont(size=12, underline=True),
+                    text_color="#5dade2",
+                    fg_color="transparent",
+                    hover_color=card_bg,
+                    anchor="w",
+                    height=20,
+                    command=lambda u=_url: webbrowser.open(u),
+                )
+                link_btn.pack(fill="x", padx=20, pady=(0, 10))
 
         # Close button
         ctk.CTkButton(
             win,
-            text="Закрити",
+            text=t("btn_close"),
             width=140,
             height=32,
             fg_color="#1a5276",
@@ -1020,7 +1049,7 @@ class App(ctk.CTk):
 
     def _show_startup_tip(self):
         """Show a random helpful tip in the status log on app launch."""
-        tip_raw = random.choice(_STARTUP_TIPS)
+        tip_raw = random.choice(_startup_tips())
         # If tip contains a URL placeholder, use clickable log
         if "{donate_url}" in tip_raw:
             parts = tip_raw.split("{donate_url}")
@@ -1034,7 +1063,7 @@ class App(ctk.CTk):
     def _open_donate(self):
         """Open the donation page in the default browser."""
         webbrowser.open(DONATE_URL)
-        self._log("❤️  Дякую за підтримку!")
+        self._log(t("log_donate_thanks"))
 
     def _check_updates_startup(self):
         """Run a silent background update check on startup (respects cooldown)."""
@@ -1053,7 +1082,7 @@ class App(ctk.CTk):
         clear_skipped()
 
         # Create a small "checking" indicator
-        self._log("🔍 Перевіряю оновлення...")
+        self._log(t("update_checking"))
 
         def _worker():
             try:
@@ -1062,12 +1091,12 @@ class App(ctk.CTk):
                     self.after(0, lambda: self._show_update_dialog(release))
                 else:
                     self.after(0, lambda: self._log(
-                        f"✅ У вас актуальна версія (v{APP_VERSION})"
+                        t("update_up_to_date", version=APP_VERSION)
                     ))
             except Exception as exc:
                 _err = str(exc)
                 self.after(0, lambda _e=_err: self._log(
-                    f"⚠️ Не вдалось перевірити оновлення: {_e}"
+                    t("update_check_failed", error=_e)
                 ))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -1082,7 +1111,7 @@ class App(ctk.CTk):
                 pass
 
         win = ctk.CTkToplevel(self)
-        win.title(f"{APP_NAME} — Оновлення")
+        win.title(f"{APP_NAME} — {t('update_title')}")
         win.geometry("540x580")
         win.resizable(True, True)
         win.transient(self)
@@ -1107,7 +1136,7 @@ class App(ctk.CTk):
         header.pack(fill="x")
         ctk.CTkLabel(
             header,
-            text="🆕  Доступне оновлення!",
+            text=t("update_header"),
             font=ctk.CTkFont(size=18, weight="bold"),
             text_color="white",
         ).pack(padx=20, pady=14)
@@ -1121,7 +1150,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             ver_row,
-            text=f"Поточна:  v{APP_VERSION}",
+            text=t("update_current", version=APP_VERSION),
             font=ctk.CTkFont(size=13),
             text_color="#aaaaaa",
         ).pack(side="left")
@@ -1135,7 +1164,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             ver_row,
-            text=f"Нова:  v{release.version}",
+            text=t("update_new", version=release.version),
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#2ecc71",
         ).pack(side="left")
@@ -1144,7 +1173,7 @@ class App(ctk.CTk):
             pub_date = release.published[:10]  # YYYY-MM-DD
             ctk.CTkLabel(
                 info_frame,
-                text=f"Дата випуску: {pub_date}",
+                text=t("update_published", date=pub_date),
                 font=ctk.CTkFont(size=11),
                 text_color="#888888",
             ).pack(padx=16, pady=(0, 10))
@@ -1152,7 +1181,7 @@ class App(ctk.CTk):
         # ── Release notes ─────────────────────────────────────────
         ctk.CTkLabel(
             win,
-            text="Що нового:",
+            text=t("update_whats_new"),
             font=ctk.CTkFont(size=13, weight="bold"),
             anchor="w",
         ).pack(fill="x", padx=24, pady=(8, 2))
@@ -1186,7 +1215,7 @@ class App(ctk.CTk):
                 if _clean:
                     body = "\n".join(_clean)
         if not body:
-            body = "Немає опису."
+            body = t("update_no_description")
         notes_box.insert("1.0", body)
         notes_box.configure(state="disabled")
 
@@ -1220,7 +1249,7 @@ class App(ctk.CTk):
                 """Download, verify, and install the update automatically."""
                 # Disable all buttons
                 if auto_update_btn:
-                    auto_update_btn.configure(state="disabled", text="⏳ Оновлюю...")
+                    auto_update_btn.configure(state="disabled", text=t("update_updating"))
                 for child in btn_frame.winfo_children():
                     try:
                         child.configure(state="disabled")
@@ -1238,7 +1267,7 @@ class App(ctk.CTk):
                     mb_total = total / (1024 * 1024)
                     win.after(0, lambda: update_progress_bar.set(frac))
                     win.after(0, lambda: update_status_label.configure(
-                        text=f"{pct:.0f}%  ·  {mb_done:.1f} / {mb_total:.1f} МБ"
+                        text=f"{pct:.0f}%  ·  {mb_done:.1f} / {mb_total:.1f} {t('unit_mb')}"
                     ))
 
                 def _status(msg: str):
@@ -1258,7 +1287,7 @@ class App(ctk.CTk):
                             win.after(0, lambda: _enable_buttons())
                             return
 
-                        _status("Встановлюю оновлення...")
+                        _status(t("updater_installing"))
                         ok, err = install_and_restart(
                             binary, status_cb=_status,
                         )
@@ -1272,14 +1301,14 @@ class App(ctk.CTk):
                     except Exception as exc:
                         _err = str(exc)
                         win.after(0, lambda _e=_err: update_status_label.configure(
-                            text=f"❌ Помилка: {_e}", text_color="#e74c3c",
+                            text=f"❌ {_e}", text_color="#e74c3c",
                         ))
                         win.after(0, lambda: _enable_buttons())
 
                 def _enable_buttons():
                     if auto_update_btn:
                         auto_update_btn.configure(
-                            state="normal", text="🔄 Оновити зараз"
+                            state="normal", text=t("btn_update_now")
                         )
                     for child in btn_frame.winfo_children():
                         try:
@@ -1291,11 +1320,11 @@ class App(ctk.CTk):
 
             auto_update_btn = ctk.CTkButton(
                 btn_frame,
-                text="🔄 Оновити зараз",
-                font=ctk.CTkFont(size=14, weight="bold"),
+                text=t("btn_update_now"),
+                font=ctk.CTkFont(size=13, weight="bold"),
                 fg_color="#2471a3",
                 hover_color="#2e86c1",
-                height=36,
+                height=40,
                 command=_auto_update,
             )
             auto_update_btn.pack(side="left", padx=(0, 6), fill="x", expand=True)
@@ -1304,7 +1333,7 @@ class App(ctk.CTk):
             # Running from archive/temp — show warning instead of update btn
             ctk.CTkLabel(
                 btn_frame,
-                text="⚠️ Розпакуйте архів для автооновлення",
+                text=t("updater_blocked_archive").split("\n")[0],
                 font=ctk.CTkFont(size=11),
                 text_color="#e67e22",
             ).pack(side="left", padx=(0, 6))
@@ -1321,7 +1350,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=12),
             fg_color="#27ae60",
             hover_color="#2ecc71",
-            height=36,
+            height=40,
             width=90,
             command=_download,
         ).pack(side="left", padx=(0, 6))
@@ -1329,35 +1358,36 @@ class App(ctk.CTk):
         def _skip():
             """Skip this specific version."""
             skip_version(release.version)
-            self._log(f"⏩ Версію v{release.version} пропущено")
+            self._log(t("update_skipped", version=release.version))
             _on_close()
 
         ctk.CTkButton(
             btn_frame,
-            text="⏩ Пропустити",
+            text=t("btn_skip_version"),
             font=ctk.CTkFont(size=12),
             fg_color="#555555",
             hover_color="#666666",
-            height=36,
+            height=40,
             width=110,
             command=_skip,
         ).pack(side="left", padx=(0, 6))
 
         ctk.CTkButton(
             btn_frame,
-            text="Пізніше",
+            text=t("btn_later"),
             font=ctk.CTkFont(size=12),
             fg_color="#3a3a3a",
             hover_color="#4a4a4a",
-            height=36,
+            height=40,
             width=80,
             command=_on_close,
         ).pack(side="right")
 
     def _set_state(self, state: str):
         """Update the connection status indicator."""
-        label_text, color = self._STATE_LABELS.get(
-            state, ("⚪  Готовий", "gray")
+        self._current_state = state
+        label_text, color = self._get_state_labels().get(
+            state, (t("state_idle"), "gray")
         )
 
         def _do():
@@ -1451,7 +1481,7 @@ class App(ctk.CTk):
         self._cancel_flag = True
         if self._current_transfer:
             self._current_transfer.cancel()
-        self._log("⏹ Скасовано користувачем")
+        self._log(t("transfer_cancelled_user"))
 
     # ── Verification dialog (mandatory MITM check) ────────────────
 
@@ -1466,7 +1496,7 @@ class App(ctk.CTk):
 
         def _show():
             dialog = ctk.CTkToplevel(self)
-            dialog.title("🔐 Верифікація з'єднання")
+            dialog.title(t("verify_title"))
             dialog.geometry("440x320")
             dialog.resizable(False, False)
             dialog.transient(self)
@@ -1481,13 +1511,13 @@ class App(ctk.CTk):
 
             ctk.CTkLabel(
                 dialog,
-                text="🔐 Верифікація з'єднання",
+                text=t("verify_title"),
                 font=ctk.CTkFont(size=18, weight="bold"),
             ).pack(pady=(20, 8))
 
             ctk.CTkLabel(
                 dialog,
-                text="Переконайтесь, що обидва учасники\nбачать однаковий код:",
+                text=t("verify_prompt"),
                 font=ctk.CTkFont(size=13),
                 justify="center",
             ).pack(pady=(0, 12))
@@ -1503,7 +1533,7 @@ class App(ctk.CTk):
 
             ctk.CTkLabel(
                 dialog,
-                text="⚠ Якщо коди різні — з'єднання може бути\nперехоплено зловмисником (MITM)!",
+                text=t("verify_warning"),
                 font=ctk.CTkFont(size=12),
                 text_color="#e74c3c",
                 justify="center",
@@ -1526,7 +1556,7 @@ class App(ctk.CTk):
 
             ctk.CTkButton(
                 btn_frame,
-                text="✅ Коди збігаються",
+                text=t("btn_codes_match"),
                 fg_color="#27ae60",
                 hover_color="#2ecc71",
                 command=_confirm,
@@ -1535,7 +1565,7 @@ class App(ctk.CTk):
 
             ctk.CTkButton(
                 btn_frame,
-                text="❌ Скасувати",
+                text=t("btn_cancel_verify"),
                 fg_color="#c0392b",
                 hover_color="#e74c3c",
                 command=_cancel,
@@ -1556,21 +1586,22 @@ class App(ctk.CTk):
         """Return a status callback that updates both the log and the state indicator."""
         def _on_status(msg: str):
             self._log(msg)
-            # Auto-detect state from relay status messages
-            lower = msg.lower()
-            if "підключаюсь" in lower:
+            # Detect state from emoji prefixes (language-independent)
+            if "🌐" in msg:  # 🌐
                 self._set_state(self.STATE_CONNECTING)
-            elif "чекаю" in lower and ("отримувач" in lower or "відправник" in lower):
-                self._set_state(self.STATE_WAITING)
-            elif "обмін ключами" in lower:
+            elif "🔑" in msg and "..." in msg:  # 🔑 + ...
                 self._set_state(self.STATE_KEY_EXCHANGE)
-            elif "верифікац" in lower and ("підтверджен" in lower or "код" in lower):
+            elif "🔑" in msg:  # 🔑
                 self._set_state(self.STATE_VERIFYING)
-            elif "надсилаю" in lower or "отримую" in lower:
+            elif "⏳" in msg:  # ⏳
+                self._set_state(self.STATE_WAITING)
+            elif "📦" in msg or ("📥" in msg and ":" in msg):  # 📦 or 📥:
                 self._set_state(self.STATE_TRANSFERRING)
-            elif "передано" in lower or "збережено" in lower:
+            elif "🎉" in msg:  # 🎉
                 self._set_state(self.STATE_DONE)
-            elif "помилка" in lower or "❌" in msg:
+            elif "✅" in msg and "/" in msg:  # ✅ x/y
+                self._set_state(self.STATE_DONE)
+            elif "❌" in msg:  # ❌
                 self._set_state(self.STATE_ERROR)
         return _on_status
 
@@ -1581,17 +1612,17 @@ class App(ctk.CTk):
     def _on_send(self):
         filepath = self.file_entry.get()
         if not filepath or not Path(filepath).is_file():
-            messagebox.showwarning("Файл", "Будь ласка, оберіть файл для надсилання.")
+            messagebox.showwarning(t("msgbox_file_title"), t("msgbox_file_body"))
             return
 
         # Check file size > 5 GB — warn but allow
         file_size = Path(filepath).stat().st_size
         if file_size > VPS_MAX_FILE_SIZE:
             proceed = messagebox.askyesno(
-                "Великий файл",
-                f"Файл ({_human_size(file_size)}) перевищує ліміт сервера "
-                f"({_human_size(VPS_MAX_FILE_SIZE)}).\n\n"
-                "Передача може бути перервана.\nПродовжити?",
+                t("msgbox_large_file_title"),
+                t("msgbox_large_file_body",
+                   file_size=_human_size(file_size),
+                   max_size=_human_size(VPS_MAX_FILE_SIZE)),
             )
             if not proceed:
                 return
@@ -1636,26 +1667,25 @@ class App(ctk.CTk):
             if ok:
                 outcome = "success"
                 self._set_state(self.STATE_DONE)
-                self._log("🎉 Передачу завершено успішно!")
+                self._log(t("transfer_complete_send"))
                 self._log_donate(
-                    "☕ Подобається SecureShare? "
-                    "Пригостіть автора кавою —",
+                    t("donate_msg_send"),
                     DONATE_URL,
                 )
             elif self._cancel_flag:
                 outcome = "cancelled"
                 self._set_state(self.STATE_IDLE)
-                self._log("⏹ Передачу скасовано")
+                self._log(t("transfer_cancelled_send"))
             else:
                 outcome = "error"
                 self._set_state(self.STATE_ERROR)
-                self._log("❌ Помилка передачі")
+                self._log(t("transfer_error_send"))
 
         except Exception as exc:
             outcome = "error"
             error_type = type(exc).__name__
             self._set_state(self.STATE_ERROR)
-            self._log(f"❌ Помилка: {exc}")
+            self._log(t("transfer_error_generic", error=str(exc)))
             log.exception("Send worker error")
             report_crash(exc, state="send_worker")
         finally:
@@ -1677,12 +1707,12 @@ class App(ctk.CTk):
     def _on_receive(self):
         code = self.recv_code_entry.get().strip().lower()
         if not code or len(code.replace("-", "")) < SESSION_CODE_LENGTH:
-            messagebox.showwarning("Код", "Введіть код сесії від відправника.")
+            messagebox.showwarning(t("msgbox_code_title"), t("msgbox_code_body"))
             return
 
         save_dir = self._save_dir
         if not save_dir or not Path(save_dir).is_dir():
-            messagebox.showwarning("Папка", "Оберіть папку для збереження.")
+            messagebox.showwarning(t("msgbox_folder_title"), t("msgbox_folder_body"))
             return
 
         self._cancel_flag = False
@@ -1726,26 +1756,25 @@ class App(ctk.CTk):
                 except Exception:
                     pass
                 self._set_state(self.STATE_DONE)
-                self._log(f"🎉 Файл отримано: {result}")
+                self._log(t("transfer_complete_recv", path=result))
                 self._log_donate(
-                    "☕ SecureShare — безкоштовний сервіс. "
-                    "Підтримайте розробку:",
+                    t("donate_msg_recv"),
                     DONATE_URL,
                 )
             elif self._cancel_flag:
                 outcome = "cancelled"
                 self._set_state(self.STATE_IDLE)
-                self._log("⏹ Отримання скасовано")
+                self._log(t("transfer_cancelled_recv"))
             else:
                 outcome = "error"
                 self._set_state(self.STATE_ERROR)
-                self._log("❌ Помилка отримання")
+                self._log(t("transfer_error_recv"))
 
         except Exception as exc:
             outcome = "error"
             error_type = type(exc).__name__
             self._set_state(self.STATE_ERROR)
-            self._log(f"❌ Помилка: {exc}")
+            self._log(t("transfer_error_generic", error=str(exc)))
             log.exception("Receive worker error")
             report_crash(exc, state="recv_worker")
         finally:

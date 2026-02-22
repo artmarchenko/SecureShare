@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import APP_VERSION, VPS_RELAY_URL
+from .i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -555,12 +556,7 @@ def get_update_blocked_reason() -> Optional[str]:
     if exe is None:
         return None  # not frozen — button won't be shown anyway
     if _is_temp_or_archive_path(exe):
-        return (
-            "Автооновлення недоступне: програма запущена з архіву "
-            "або тимчасової папки.\n\n"
-            "Розпакуйте SecureShare.zip в окрему папку і "
-            "запустіть звідти."
-        )
+        return t("updater_blocked_archive")
     return None
 
 
@@ -612,16 +608,16 @@ def download_and_verify(
         # ── 2. Download SHA256SUMS.txt (if available) ─────────────
         expected_sha256 = ""
         if release.checksums_url:
-            _status("Завантажую контрольні суми...")
+            _status(t("updater_downloading_checksums"))
             checksums = _fetch_checksums(release.checksums_url)
             if archive_filename and archive_filename in checksums:
                 expected_sha256 = checksums[archive_filename]
-                _status(f"SHA-256 очікується: {expected_sha256[:16]}...")
+                _status(t("updater_sha_expected", sha=expected_sha256[:16]))
             else:
-                _status("SHA256SUMS.txt не містить запису для цього файлу")
+                _status(t("updater_sha_missing"))
 
         # ── 3. Download archive ───────────────────────────────────
-        _status("Завантажую оновлення...")
+        _status(t("updater_downloading"))
 
         req = urllib.request.Request(
             download_url,
@@ -646,7 +642,7 @@ def download_and_verify(
             actual_sha256 = hasher.hexdigest()
 
         actual_size = archive_path.stat().st_size
-        _status(f"Завантажено {actual_size:,} байт")
+        _status(t("updater_downloaded", size=f"{actual_size:,}"))
 
         # ── 4. Verify file size ───────────────────────────────────
         if expected_size and actual_size != expected_size:
@@ -669,7 +665,7 @@ def download_and_verify(
             _status(f"SHA-256: {actual_sha256} (no reference to verify against)")
 
         # ── 6. Extract archive ────────────────────────────────────
-        _status("Розпаковую...")
+        _status(t("updater_extracting"))
         extract_dir = temp_dir / "extracted"
         extract_dir.mkdir()
 
@@ -682,12 +678,12 @@ def download_and_verify(
             return None, f"Extraction failed: {err}"
 
         # ── 7. Verify binary ─────────────────────────────────────
-        _status("Перевіряю бінарний файл...")
+        _status(t("updater_verifying_binary"))
         ok, err = _verify_binary(binary_path)
         if not ok:
             return None, f"Binary verification failed: {err}"
 
-        _status("Оновлення перевірено")
+        _status(t("updater_verified"))
         return binary_path, ""
 
     except Exception as exc:
@@ -751,7 +747,7 @@ def _install_windows(
     backup_path = current_exe.with_suffix(".exe.bak")
 
     try:
-        status_cb("Встановлюю оновлення...")
+        status_cb(t("updater_installing"))
 
         # 1. Remove old backup if exists
         if backup_path.exists():
@@ -764,14 +760,14 @@ def _install_windows(
         #    (Windows allows renaming a running executable)
         try:
             os.replace(str(current_exe), str(backup_path))
-            status_cb("Резервна копія створена")
+            status_cb(t("updater_backup_created"))
         except OSError as rename_err:
             return False, f"Cannot rename running exe: {rename_err}"
 
         # 3. Copy the new binary into the original path
         try:
             shutil.copy2(str(new_binary), str(current_exe))
-            status_cb("Оновлення встановлено")
+            status_cb(t("updater_installed"))
         except OSError as copy_err:
             # Rollback: restore the backup
             try:
@@ -781,7 +777,7 @@ def _install_windows(
             return False, f"Cannot copy new binary: {copy_err}"
 
         # 4. Launch the new exe
-        status_cb("Запускаю нову версію...")
+        status_cb(t("updater_launching_new"))
         log.info("[Updater] Launching new version: %s", current_exe)
 
         subprocess.Popen(
@@ -801,7 +797,7 @@ def _install_windows(
             pass
 
         # 6. Exit the current (old) process
-        status_cb("Завершую стару версію...")
+        status_cb(t("updater_exiting_old"))
         log.info("[Updater] Exiting old process (PID %d)...", os.getpid())
 
         # os._exit() terminates the entire process immediately,
@@ -836,7 +832,7 @@ def _install_linux(
         shutil.move(str(new_binary), str(current_exe))
         current_exe.chmod(0o755)
 
-        status_cb("Перезапуск...")
+        status_cb(t("updater_restarting"))
         log.info("Restarting with new binary: %s", current_exe)
 
         # Replace current process with the new binary
