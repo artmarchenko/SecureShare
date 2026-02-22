@@ -608,12 +608,15 @@ class RelayServer:
         self._landing = LandingAnalytics(DATA_DIR)
         self._http_router = HTTPRouter(self._analytics, self._crashes,
                                        self._landing)
+        self._background_tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
         log.info("SecureShare Relay Server starting on %s:%d", LISTEN_HOST, LISTEN_PORT)
-        asyncio.create_task(self._cleanup_loop())
-        asyncio.create_task(self._stats_loop())
-        asyncio.create_task(self._analytics_flush_loop())
+        self._background_tasks = [
+            asyncio.create_task(self._cleanup_loop()),
+            asyncio.create_task(self._stats_loop()),
+            asyncio.create_task(self._analytics_flush_loop()),
+        ]
 
         # HTTP API server (health + admin + crash/telemetry endpoints)
         api_server = await asyncio.start_server(
@@ -931,19 +934,28 @@ def main():
             {server_task, shutdown_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
+        # Cancel server task
         for task in pending:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
+        # Cancel background tasks (cleanup, stats, flush loops)
+        for task in server._background_tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        # Close all WebSocket rooms
         for rid, room in list(server._rooms.items()):
             for ws in list(room):
                 try:
                     await ws.close(1001, "server shutting down")
                 except Exception:
                     pass
-        # Final analytics flush
+        # Final analytics flush (ensures no data loss)
         server._analytics.flush_hourly()
         server._landing.flush()
         log.info("Server stopped gracefully. Stats: %s", server._stats_basic)
