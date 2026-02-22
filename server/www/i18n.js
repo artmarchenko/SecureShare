@@ -271,4 +271,58 @@
   var saved = 'uk';
   try { saved = localStorage.getItem('ss_lang') || 'uk'; } catch(e) {}
   if (saved !== 'uk') applyLang(saved);
+
+  /* ── Gallery Carousel ─────────────────────────── */
+  var track = document.getElementById('galTrack');
+  var dots  = document.querySelectorAll('#galDots .dot');
+  var prev  = document.getElementById('galPrev');
+  var next  = document.getElementById('galNext');
+
+  if (track && dots.length) {
+    var cards = track.querySelectorAll('.gallery-card');
+    var current = 0;
+
+    function scrollToCard(idx) {
+      if (idx < 0) idx = cards.length - 1;
+      if (idx >= cards.length) idx = 0;
+      current = idx;
+      cards[idx].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      updateDots();
+    }
+
+    function updateDots() {
+      for (var i = 0; i < dots.length; i++) {
+        dots[i].className = i === current ? 'dot active' : 'dot';
+      }
+    }
+
+    prev.addEventListener('click', function() { scrollToCard(current - 1); });
+    next.addEventListener('click', function() { scrollToCard(current + 1); });
+
+    for (var d = 0; d < dots.length; d++) {
+      (function(idx) {
+        dots[idx].addEventListener('click', function() { scrollToCard(idx); });
+      })(d);
+    }
+
+    /* sync dots on manual scroll */
+    var scrollTimer;
+    track.addEventListener('scroll', function() {
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(function() {
+        var trackRect = track.getBoundingClientRect();
+        var center = trackRect.left + trackRect.width / 2;
+        var closest = 0;
+        var minDist = Infinity;
+        for (var i = 0; i < cards.length; i++) {
+          var r = cards[i].getBoundingClientRect();
+          var cardCenter = r.left + r.width / 2;
+          var dist = Math.abs(cardCenter - center);
+          if (dist < minDist) { minDist = dist; closest = i; }
+        }
+        current = closest;
+        updateDots();
+      }, 80);
+    });
+  }
 })();

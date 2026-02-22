@@ -226,7 +226,7 @@
       font-size: 1.4rem;
     }
 
-    /* ── App Preview / Workflow ────────────────────── */
+    /* ── App Preview / Gallery Carousel ─────────────── */
     .app-preview {
       padding: 100px 0;
       background: linear-gradient(135deg, #0B1929 0%, #1a2d45 50%, #132F4C 100%);
@@ -236,157 +236,155 @@
     .app-preview .section-title { color: var(--white); }
     .app-preview .section-sub { color: rgba(255,255,255,.6); }
 
-    .workflow {
-      max-width: 1000px;
+    .gallery-wrap {
+      position: relative;
+      max-width: 1100px;
       margin: 0 auto;
-      position: relative;
-    }
-    /* vertical connector line */
-    .workflow::before {
-      content: '';
-      position: absolute;
-      left: 50%;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: linear-gradient(to bottom,
-        transparent 0%,
-        rgba(100,181,246,.4) 5%,
-        rgba(100,181,246,.4) 95%,
-        transparent 100%
-      );
-      transform: translateX(-50%);
     }
 
-    .wf-step {
+    .gallery-track {
       display: flex;
-      align-items: center;
-      gap: 48px;
-      position: relative;
-      padding: 24px 0;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+      gap: 24px;
+      padding: 20px 40px 28px;
+      /* hide scrollbar */
+      scrollbar-width: none;
+      -ms-overflow-style: none;
     }
-    .wf-step:first-child { padding-top: 0; }
-    .wf-step:last-child { padding-bottom: 0; }
-    /* even rows: reverse order (zigzag) */
-    .wf-step:nth-child(even) { flex-direction: row-reverse; }
-    .wf-step:nth-child(even) .wf-text { text-align: right; }
+    .gallery-track::-webkit-scrollbar { display: none; }
 
-    /* step number on the center line */
-    .wf-num {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, var(--blue), var(--blue-d));
-      color: var(--white);
-      font-size: 1.1rem;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 20px rgba(21,101,192,.5);
-      z-index: 2;
-      border: 3px solid #0B1929;
-    }
-
-    /* screenshot side */
-    .wf-img {
-      flex: 0 0 42%;
-      max-width: 42%;
-      border-radius: 16px;
+    .gallery-card {
+      flex: 0 0 340px;
+      scroll-snap-align: center;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 20px;
       overflow: hidden;
-      background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.08);
-      box-shadow: 0 8px 40px rgba(0,0,0,.35);
-      transition: transform .3s, box-shadow .3s;
+      transition: transform .35s, box-shadow .35s;
+      position: relative;
     }
-    .wf-img:hover {
-      transform: translateY(-4px) scale(1.015);
-      box-shadow: 0 16px 56px rgba(0,0,0,.5);
+    .gallery-card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
     }
-    .wf-img img {
+    .gallery-card img {
       width: 100%;
       height: auto;
       display: block;
     }
-
-    /* text side */
-    .wf-text {
-      flex: 1;
-      min-width: 0;
+    .gallery-card .gc-badge {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px 6px 8px;
+      border-radius: 20px;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,.12);
+      z-index: 2;
     }
-    .wf-text .wf-icon {
-      width: 52px;
-      height: 52px;
-      border-radius: 14px;
-      display: inline-flex;
+    .gc-badge .gc-num {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--blue), var(--blue-d));
+      color: var(--white);
+      font-size: .8rem;
+      font-weight: 700;
+      display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 16px;
     }
-    .wf-text .wf-icon svg { width: 24px; height: 24px; }
-    .wf-text .wf-icon.blue { background: rgba(21,101,192,.2); color: #64B5F6; }
-    .wf-text .wf-icon.green { background: rgba(67,160,71,.2); color: #81C784; }
-    .wf-text .wf-icon.orange { background: rgba(255,111,0,.2); color: #FFB74D; }
-    .wf-text h3 {
-      font-size: 1.35rem;
+    .gc-badge .gc-label {
+      font-size: .82rem;
+      font-weight: 600;
+      color: rgba(255,255,255,.9);
+    }
+    .gallery-card .gc-caption {
+      padding: 18px 20px;
+      background: linear-gradient(to top, rgba(0,0,0,.5), rgba(0,0,0,.15));
+    }
+    .gc-caption h4 {
+      font-size: 1.05rem;
       font-weight: 700;
-      margin-bottom: 8px;
       color: var(--white);
+      margin: 0 0 4px;
     }
-    .wf-text p {
-      font-size: 1rem;
-      color: rgba(255,255,255,.6);
-      line-height: 1.7;
-      max-width: 360px;
-    }
-    .wf-step:nth-child(even) .wf-text p {
-      margin-left: auto;
+    .gc-caption p {
+      font-size: .88rem;
+      color: rgba(255,255,255,.55);
+      margin: 0;
+      line-height: 1.5;
     }
 
-    /* arrow between steps */
-    .wf-arrow {
-      text-align: center;
-      padding: 4px 0;
-      position: relative;
-      z-index: 1;
+    /* navigation arrows */
+    .gallery-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-70%);
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.1);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,.15);
+      color: var(--white);
+      font-size: 1.4rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .2s;
+      z-index: 3;
     }
-    .wf-arrow svg {
-      width: 28px;
-      height: 28px;
-      color: rgba(100,181,246,.5);
-      filter: drop-shadow(0 2px 6px rgba(21,101,192,.3));
+    .gallery-nav:hover {
+      background: rgba(255,255,255,.2);
+      transform: translateY(-70%) scale(1.1);
+    }
+    .gallery-prev { left: -8px; }
+    .gallery-next { right: -8px; }
+    .gallery-nav svg { width: 22px; height: 22px; }
+
+    /* dot indicators */
+    .gallery-dots {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .gallery-dots .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.2);
+      border: none;
+      cursor: pointer;
+      transition: all .25s;
+      padding: 0;
+    }
+    .gallery-dots .dot.active {
+      background: var(--blue);
+      box-shadow: 0 0 10px rgba(21,101,192,.6);
+      transform: scale(1.2);
+    }
+    .gallery-dots .dot:hover:not(.active) {
+      background: rgba(255,255,255,.4);
     }
 
-    @media (max-width: 900px) {
-      .workflow::before { left: 24px; }
-      .wf-step,
-      .wf-step:nth-child(even) {
-        flex-direction: column;
-        gap: 20px;
-        padding-left: 56px;
-      }
-      .wf-step:nth-child(even) .wf-text { text-align: left; }
-      .wf-step:nth-child(even) .wf-text p { margin-left: 0; }
-      .wf-num {
-        left: 24px;
-        top: 0;
-        transform: translate(-50%, 0);
-        width: 38px;
-        height: 38px;
-        font-size: 1rem;
-      }
-      .wf-img {
-        flex: none;
-        max-width: 100%;
-        width: 100%;
-      }
-      .wf-text h3 { font-size: 1.15rem; }
-      .wf-arrow { display: none; }
+    @media (max-width: 768px) {
       .app-preview { padding: 60px 0; }
+      .gallery-card { flex: 0 0 290px; }
+      .gallery-track { gap: 16px; padding: 16px 24px 24px; }
+      .gallery-nav { display: none; }
+      .gallery-wrap { margin: 0 -24px; }
     }
 
     /* ── Security ──────────────────────────────────── */
@@ -835,85 +833,69 @@
     </div>
   </section>
 
-  <!-- App Preview / Workflow -->
+  <!-- App Preview / Gallery -->
   <section class="app-preview" id="preview">
     <div class="container">
       <h2 class="section-title" data-i18n="preview_title">Подивіться в дії</h2>
       <p class="section-sub" data-i18n="preview_sub">Так виглядає безпечна передача файлу від початку до кінця</p>
-      <div class="workflow">
+    </div>
+    <div class="gallery-wrap">
+      <!-- nav arrows -->
+      <button class="gallery-nav gallery-prev" id="galPrev" type="button" aria-label="Previous">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button class="gallery-nav gallery-next" id="galNext" type="button" aria-label="Next">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
 
-        <!-- Step 1: Connect -->
-        <div class="wf-step">
-          <div class="wf-num">1</div>
-          <div class="wf-img">
-            <img src="/img/screen-connect.jpg" alt="SecureShare — Connection" loading="lazy">
-          </div>
-          <div class="wf-text">
-            <div class="wf-icon blue">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            </div>
-            <h3 data-i18n="preview_cap1_title">Підключення</h3>
+      <div class="gallery-track" id="galTrack">
+        <!-- 1. Connect -->
+        <div class="gallery-card">
+          <div class="gc-badge"><span class="gc-num">1</span><span class="gc-label" data-i18n="preview_cap1_title">Підключення</span></div>
+          <img src="/img/screen-connect.jpg" alt="SecureShare — Connection" loading="lazy">
+          <div class="gc-caption">
+            <h4 data-i18n="preview_cap1_title">Підключення</h4>
             <p data-i18n="preview_cap1_desc">Обмін ключами та верифікація з'єднання</p>
           </div>
         </div>
 
-        <div class="wf-arrow">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-
-        <!-- Step 2: Verify -->
-        <div class="wf-step">
-          <div class="wf-num">2</div>
-          <div class="wf-img">
-            <img src="/img/screen-verify.jpg" alt="SecureShare — Verification" loading="lazy">
-          </div>
-          <div class="wf-text">
-            <div class="wf-icon orange">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-            </div>
-            <h3 data-i18n="preview_cap2_title">Верифікація</h3>
+        <!-- 2. Verify -->
+        <div class="gallery-card">
+          <div class="gc-badge"><span class="gc-num">2</span><span class="gc-label" data-i18n="preview_cap2_title">Верифікація</span></div>
+          <img src="/img/screen-verify.jpg" alt="SecureShare — Verification" loading="lazy">
+          <div class="gc-caption">
+            <h4 data-i18n="preview_cap2_title">Верифікація</h4>
             <p data-i18n="preview_cap2_desc">Код безпеки захищає від MITM-атак</p>
           </div>
         </div>
 
-        <div class="wf-arrow">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-
-        <!-- Step 3: Send -->
-        <div class="wf-step">
-          <div class="wf-num">3</div>
-          <div class="wf-img">
-            <img src="/img/screen-send.jpg" alt="SecureShare — Sending" loading="lazy">
-          </div>
-          <div class="wf-text">
-            <div class="wf-icon green">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-            </div>
-            <h3 data-i18n="preview_cap3_title">Відправка</h3>
+        <!-- 3. Send -->
+        <div class="gallery-card">
+          <div class="gc-badge"><span class="gc-num">3</span><span class="gc-label" data-i18n="preview_cap3_title">Відправка</span></div>
+          <img src="/img/screen-send.jpg" alt="SecureShare — Sending" loading="lazy">
+          <div class="gc-caption">
+            <h4 data-i18n="preview_cap3_title">Відправка</h4>
             <p data-i18n="preview_cap3_desc">E2E-шифрування в реальному часі, 15+ МБ/с</p>
           </div>
         </div>
 
-        <div class="wf-arrow">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-
-        <!-- Step 4: Receive -->
-        <div class="wf-step">
-          <div class="wf-num">4</div>
-          <div class="wf-img">
-            <img src="/img/screen-receive.jpg" alt="SecureShare — Receiving" loading="lazy">
-          </div>
-          <div class="wf-text">
-            <div class="wf-icon green">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            </div>
-            <h3 data-i18n="preview_cap4_title">Отримання</h3>
+        <!-- 4. Receive -->
+        <div class="gallery-card">
+          <div class="gc-badge"><span class="gc-num">4</span><span class="gc-label" data-i18n="preview_cap4_title">Отримання</span></div>
+          <img src="/img/screen-receive.jpg" alt="SecureShare — Receiving" loading="lazy">
+          <div class="gc-caption">
+            <h4 data-i18n="preview_cap4_title">Отримання</h4>
             <p data-i18n="preview_cap4_desc">Автоматична розшифровка та перевірка цілісності</p>
           </div>
         </div>
+      </div>
 
+      <!-- dot indicators -->
+      <div class="gallery-dots" id="galDots">
+        <button class="dot active" type="button" aria-label="Slide 1"></button>
+        <button class="dot" type="button" aria-label="Slide 2"></button>
+        <button class="dot" type="button" aria-label="Slide 3"></button>
+        <button class="dot" type="button" aria-label="Slide 4"></button>
       </div>
     </div>
   </section>
