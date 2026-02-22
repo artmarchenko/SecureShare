@@ -694,13 +694,60 @@
 
     /* ── Responsive ────────────────────────────────── */
     @media (max-width: 768px) {
-      .hero { padding: 60px 0 80px; }
+      .container { padding: 0 16px; }
+      .hero { padding: 50px 0 60px; }
       .hero-logo { width: 80px; height: 80px; }
+      .hero h1 { margin-bottom: 12px; }
+      .hero p { margin-bottom: 28px; }
+      .hero-badges { gap: 8px; margin-bottom: 28px; }
+      .badge { padding: 5px 10px; font-size: .78rem; }
+      .btn { padding: 14px 24px; font-size: 1rem; }
+      .hero-buttons { gap: 10px; }
       .steps { flex-direction: column; gap: 32px; }
       .step-arrow { display: none; }
-      .features, .how-it-works, .security { padding: 60px 0; }
+      .features, .how-it-works, .security, .changelog { padding: 60px 0; }
+      .cta { padding: 50px 0; }
+      .cta .btn-primary { font-size: 1rem; padding: 14px 32px; }
+      .section-title { margin-bottom: 8px; }
+      .section-sub { font-size: 1rem; margin-bottom: 40px; }
+      .features-grid { grid-template-columns: 1fr; gap: 16px; }
+      .feature-card { padding: 24px 20px; }
+      .security-grid { grid-template-columns: 1fr; gap: 16px; }
+      .sec-item { padding: 20px 18px; }
+      .timeline { padding-left: 32px; margin-top: 40px; }
+      .timeline::before { left: 11px; }
+      .tl-dot { left: -28px; }
+      .tl-item.major .tl-dot { left: -30px; }
+      .tl-item.latest .tl-dot { left: -31px; }
+      .tl-header { gap: 8px; }
+      .tl-version { font-size: 1rem; }
+      .tl-changes li { font-size: .85rem; }
+      .support { padding: 50px 0; }
+      .support-emoji { font-size: 2.8rem; }
+      .support-text { font-size: 1rem; }
+      .support-details { gap: 16px; }
+      .support-item { min-width: 140px; padding: 16px 18px; }
+      .btn-donate { padding: 14px 32px; font-size: 1.05rem; }
+      .footer-links { gap: 16px; font-size: .85rem; }
+      footer p { font-size: .8rem; }
       .lang-toggle { top: 12px; right: 12px; }
       .lang-btn { padding: 5px 10px; font-size: .78rem; }
+    }
+
+    /* ── Extra small screens ─────────────────────── */
+    @media (max-width: 400px) {
+      .container { padding: 0 12px; }
+      .hero { padding: 40px 0 50px; }
+      .hero-logo { width: 64px; height: 64px; margin-bottom: 16px; }
+      .btn { padding: 12px 20px; font-size: .92rem; gap: 8px; }
+      .btn svg { width: 18px; height: 18px; }
+      .hero-buttons { flex-direction: column; align-items: center; gap: 8px; }
+      .hero-buttons .btn { width: 100%; justify-content: center; }
+      .badge { font-size: .72rem; padding: 4px 8px; }
+      .feature-card { padding: 20px 16px; }
+      .support-details { flex-direction: column; align-items: center; }
+      .support-item { width: 100%; }
+      .footer-links { flex-direction: column; gap: 10px; }
     }
   </style>
 </head>
