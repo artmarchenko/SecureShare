@@ -194,13 +194,45 @@ class HTTPRouter:
     ) -> None:
         """Handle an HTTP connection on the health/API port."""
         try:
-            # Read request (max 64 KB to prevent abuse)
-            raw = await asyncio.wait_for(reader.read(65536), timeout=10)
-            if not raw:
-                return
+            # Read headers first (up to 16 KB)
+            header_data = b""
+            while b"\r\n\r\n" not in header_data:
+                chunk = await asyncio.wait_for(
+                    reader.read(16384), timeout=10
+                )
+                if not chunk:
+                    return
+                header_data += chunk
+                if len(header_data) > 65536:
+                    return  # headers too large
 
-            request_text = raw.decode("utf-8", errors="replace")
-            method, path, query, headers, body = _parse_http(request_text)
+            # Split headers from any body data already received
+            header_end = header_data.index(b"\r\n\r\n") + 4
+            header_bytes = header_data[:header_end]
+            body_start = header_data[header_end:]
+
+            request_text = header_bytes.decode("utf-8", errors="replace")
+            method, path, query, headers, _ = _parse_http(request_text)
+
+            # Read remaining body based on Content-Length
+            content_length = 0
+            try:
+                content_length = int(headers.get("content-length", "0"))
+            except (ValueError, TypeError):
+                pass
+
+            # Cap body size at 64 KB
+            content_length = min(content_length, 65536)
+            body = ""
+            if content_length > 0:
+                remaining = content_length - len(body_start)
+                body_bytes = body_start
+                if remaining > 0:
+                    extra = await asyncio.wait_for(
+                        reader.readexactly(remaining), timeout=10
+                    )
+                    body_bytes += extra
+                body = body_bytes.decode("utf-8", errors="replace")
 
             # Get client IP for rate limiting
             ip = _get_ip_from_headers(headers, writer)
