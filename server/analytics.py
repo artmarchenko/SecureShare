@@ -699,6 +699,7 @@ class LandingAnalytics:
 
         # ── Unique visitors (hashed IP per day) ───────────────
         self._daily_visitors: dict[str, set] = defaultdict(set)
+        self._daily_unique_counts: dict[str, int] = {}  # restored from disk
         self._daily_salt = os.urandom(32)  # rotated daily
         self._salt_day = _day_key()
 
@@ -740,6 +741,11 @@ class LandingAnalytics:
                 self._daily_views[day] = int(count)
             for day, count in last.get("daily_downloads", {}).items():
                 self._daily_downloads[day] = int(count)
+
+            # Restore unique visitor counts (sets can't be restored,
+            # but we keep the counts for historical days)
+            for day, count in last.get("daily_unique", {}).items():
+                self._daily_unique_counts[day] = int(count)
 
             # Restore distributions
             for k, v in last.get("referrers", {}).items():
@@ -809,7 +815,8 @@ class LandingAnalytics:
             return "desktop-large"
 
     def record_page_view(self, ip: str, referrer: str = "",
-                         lang: str = "", screen_w: int = 0) -> None:
+                         lang: str = "", screen_w: int = 0,
+                         screen_label: str = "") -> None:
         """Record a landing page view."""
         today = _day_key()
 
@@ -831,6 +838,9 @@ class LandingAnalytics:
         if screen_w > 0:
             bucket = self._screen_bucket(screen_w)
             _safe_incr(self._screen_sizes, bucket)
+        elif screen_label in ("mobile", "tablet", "desktop",
+                              "desktop-large"):
+            _safe_incr(self._screen_sizes, screen_label)
 
     def record_download(self, ip: str, asset: str = "windows",
                         source: str = "landing") -> None:
@@ -846,16 +856,28 @@ class LandingAnalytics:
         _safe_incr(self._downloads_by_asset, safe_asset)
         _safe_incr(self._downloads_by_source, safe_source)
 
+    def _unique_for_day(self, day: str) -> int:
+        """Get unique visitor count for a day.
+
+        Uses live set if available, falls back to restored count.
+        """
+        live_set = self._daily_visitors.get(day)
+        if live_set:
+            return len(live_set)
+        return self._daily_unique_counts.get(day, 0)
+
     def get_summary(self) -> dict:
         """Return landing analytics summary."""
         today = _day_key()
 
         # Calculate unique visitors for today and last 7 days
-        unique_today = len(self._daily_visitors.get(today, set()))
-        unique_7d = sum(
-            len(visitors)
-            for day, visitors in self._daily_visitors.items()
-        )
+        unique_today = self._unique_for_day(today)
+
+        # Collect all days with data
+        all_days = set(self._daily_views.keys())
+        all_days.update(self._daily_visitors.keys())
+        all_days.update(self._daily_unique_counts.keys())
+        unique_7d = sum(self._unique_for_day(d) for d in all_days)
 
         # Views for last 7 days
         views_7d = sum(self._daily_views.values())
@@ -866,7 +888,7 @@ class LandingAnalytics:
         for day in sorted_days:
             daily[day] = {
                 "views": self._daily_views.get(day, 0),
-                "unique": len(self._daily_visitors.get(day, set())),
+                "unique": self._unique_for_day(day),
                 "downloads": self._daily_downloads.get(day, 0),
             }
 

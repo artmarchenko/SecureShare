@@ -385,9 +385,12 @@ class HTTPRouter:
             screen_w = int(data.get("screen_w", 0))
         except (TypeError, ValueError):
             pass
+        # Also accept "screen" as a string label (mobile/tablet/desktop)
+        screen_label = str(data.get("screen", ""))[:20].lower()
 
         self._landing.record_page_view(
-            ip=ip, referrer=referrer, lang=lang, screen_w=screen_w
+            ip=ip, referrer=referrer, lang=lang,
+            screen_w=screen_w, screen_label=screen_label,
         )
         await _send_response(writer, 201, {"status": "ok"})
 
