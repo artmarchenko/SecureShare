@@ -128,6 +128,8 @@
       footer_devs: "For developers",
       footer_changelog: "What\u2019s new",
       footer_bug: "Report a bug",
+      footer_contact: "Contact us",
+      footer_privacy: "Privacy Policy",
       footer_support: "Support"
     },
     de: {
@@ -258,6 +260,8 @@
       footer_devs: "F\u00fcr Entwickler",
       footer_changelog: "Was gibt\u2019s Neues",
       footer_bug: "Fehler melden",
+      footer_contact: "Kontakt",
+      footer_privacy: "Datenschutz",
       footer_support: "Unterst\u00fctzen"
     }
   };

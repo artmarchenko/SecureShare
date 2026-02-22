@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — SecureShare</title>
+  <style>
+    :root {
+      --bg: #0B1929;
+      --card: #132F4C;
+      --text: #F8FAFC;
+      --muted: rgba(255,255,255,.6);
+      --accent: #43A047;
+      --border: rgba(255,255,255,.08);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+    .updated {
+      color: var(--muted);
+      font-size: .9rem;
+      margin-bottom: 40px;
+    }
+    h2 {
+      font-size: 1.3rem;
+      margin-top: 36px;
+      margin-bottom: 12px;
+      color: var(--accent);
+    }
+    p, li {
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    ul {
+      padding-left: 24px;
+      margin-bottom: 16px;
+    }
+    strong { color: var(--text); }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+    .back {
+      display: inline-block;
+      margin-top: 40px;
+      padding: 10px 24px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50px;
+      font-weight: 600;
+      transition: background .2s, transform .2s;
+    }
+    .back:hover {
+      background: #5CB85C;
+      transform: translateY(-2px);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: February 22, 2026</p>
+
+    <h2>Overview</h2>
+    <p>SecureShare is an <strong>open-source, peer-to-peer file sharing application</strong> designed with privacy as a core principle. We collect the absolute minimum data necessary to operate the service.</p>
+
+    <h2>What We Do NOT Collect</h2>
+    <ul>
+      <li><strong>File contents</strong> — all transfers are end-to-end encrypted. The relay server never sees your data.</li>
+      <li><strong>File names or metadata</strong> — not logged, not stored.</li>
+      <li><strong>Session codes</strong> — not logged on the server.</li>
+      <li><strong>User accounts</strong> — there are none. No registration, no login.</li>
+      <li><strong>Cookies or tracking pixels</strong> — we don't use any.</li>
+      <li><strong>IP addresses in logs</strong> — IPs are only used in-memory for rate limiting and are never written to disk.</li>
+    </ul>
+
+    <h2>What We Collect</h2>
+    <p>We collect <strong>anonymous, aggregated statistics</strong> to understand how the service is used and to improve it:</p>
+    <ul>
+      <li><strong>Relay statistics:</strong> total number of sessions, bytes relayed, session durations (aggregated, not per-user).</li>
+      <li><strong>App version &amp; OS type:</strong> to know which platforms need support.</li>
+      <li><strong>Crash reports:</strong> when the app crashes, an anonymous report (error type, traceback, app version, OS) may be sent automatically. No personal data is included.</li>
+      <li><strong>Landing page analytics:</strong> page views, referrer domains (not full URLs), selected language, screen size bucket (mobile/tablet/desktop). Unique visitors are counted using a SHA-256 hash of IP + daily rotating salt — the hash is not reversible and changes every day.</li>
+    </ul>
+
+    <h2>Data Storage</h2>
+    <ul>
+      <li>All analytics data is stored on our self-hosted server (Oracle Cloud, Frankfurt region).</li>
+      <li>No data is shared with third parties.</li>
+      <li>No external analytics services (Google Analytics, etc.) are used.</li>
+      <li>JSONL log files are rotated monthly and limited in size.</li>
+    </ul>
+
+    <h2>Downloads</h2>
+    <p>Application downloads are served through <strong>GitHub Releases</strong>. GitHub's own privacy policy applies to the download process. We track download counts anonymously on our landing page via JavaScript beacons.</p>
+
+    <h2>End-to-End Encryption</h2>
+    <p>All file transfers use <strong>XChaCha20-Poly1305</strong> encryption with keys derived from <strong>X25519 key exchange</strong>. The relay server acts only as a dumb pipe — it cannot decrypt, inspect, or modify any transferred data.</p>
+
+    <h2>Open Source</h2>
+    <p>SecureShare is fully open source. You can audit the code, verify our privacy claims, and build the application yourself:</p>
+    <p><a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">github.com/artmarchenko/SecureShare</a></p>
+
+    <h2>Contact</h2>
+    <p>If you have questions about this privacy policy or the data we collect:</p>
+    <ul>
+      <li>Email: <a href="mailto:secureshare.app@gmail.com">secureshare.app@gmail.com</a></li>
+      <li>GitHub Issues: <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener">Report an issue</a></li>
+    </ul>
+
+    <a href="/" class="back">← Back to SecureShare</a>
+  </div>
+</body>
+</html>
