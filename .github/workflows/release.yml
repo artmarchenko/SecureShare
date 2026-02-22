@@ -91,6 +91,24 @@ jobs:
             sleep $i
           done
 
+      - name: Wait for server healthy
+        run: |
+          echo "Waiting for relay server to be healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 5 \
+              https://secureshare-relay.duckdns.org/api/version 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Server healthy on attempt $i (HTTP $STATUS)"
+              break
+            fi
+            echo "Attempt $i: HTTP $STATUS — waiting 5s..."
+            sleep 5
+          done
+          if [ "$STATUS" != "200" ]; then
+            echo "::warning::Server not responding after 30 attempts"
+          fi
+
       - name: Run server test suite
         run: python server/test_relay.py
 
