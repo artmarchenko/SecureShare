@@ -25,6 +25,10 @@
   <meta name="twitter:description" content="End-to-end encrypted file transfer. No registration, no cloud, no traces.">
   <meta name="twitter:image" content="https://secureshare-relay.duckdns.org/og-image.png">
   <link rel="icon" type="image/png" href="/favicon.png">
+  <!-- Performance hints -->
+  <link rel="preload" href="/logo.png" as="image">
+  <link rel="dns-prefetch" href="https://github.com">
+  <link rel="dns-prefetch" href="https://ko-fi.com">
   <!-- Structured Data -->
   <script type="application/ld+json">
   {
@@ -898,7 +902,7 @@
   <!-- Hero -->
   <section class="hero">
     <div class="container hero-content">
-      <img src="/logo.png" alt="SecureShare" class="hero-logo" width="120" height="120">
+      <img src="/logo.png" alt="SecureShare" class="hero-logo" width="120" height="120" fetchpriority="high">
       <h1>Secure<span>Share</span></h1>
       <p data-i18n="hero_subtitle">Передавайте файли напряму між пристроями з наскрізним шифруванням. Без реєстрації, без хмари, без слідів.</p>
       <div class="hero-badges">
@@ -1034,7 +1038,7 @@
         <!-- 1. Connect -->
         <div class="gallery-card">
           <div class="gc-badge"><span class="gc-num">1</span><span class="gc-label" data-i18n="preview_cap1_title">Підключення</span></div>
-          <img src="/img/screen-connect.jpg" alt="SecureShare — Connection" loading="lazy">
+          <img src="/img/screen-connect.jpg" alt="SecureShare — Connection" loading="lazy" width="680" height="460">
           <div class="gc-caption">
             <h4 data-i18n="preview_cap1_title">Підключення</h4>
             <p data-i18n="preview_cap1_desc">Обмін ключами та верифікація з'єднання</p>
@@ -1044,7 +1048,7 @@
         <!-- 2. Verify -->
         <div class="gallery-card">
           <div class="gc-badge"><span class="gc-num">2</span><span class="gc-label" data-i18n="preview_cap2_title">Верифікація</span></div>
-          <img src="/img/screen-verify.jpg" alt="SecureShare — Verification" loading="lazy">
+          <img src="/img/screen-verify.jpg" alt="SecureShare — Verification" loading="lazy" width="680" height="460">
           <div class="gc-caption">
             <h4 data-i18n="preview_cap2_title">Верифікація</h4>
             <p data-i18n="preview_cap2_desc">Код безпеки захищає від MITM-атак</p>
@@ -1054,7 +1058,7 @@
         <!-- 3. Send -->
         <div class="gallery-card">
           <div class="gc-badge"><span class="gc-num">3</span><span class="gc-label" data-i18n="preview_cap3_title">Відправка</span></div>
-          <img src="/img/screen-send.jpg" alt="SecureShare — Sending" loading="lazy">
+          <img src="/img/screen-send.jpg" alt="SecureShare — Sending" loading="lazy" width="680" height="460">
           <div class="gc-caption">
             <h4 data-i18n="preview_cap3_title">Відправка</h4>
             <p data-i18n="preview_cap3_desc">E2E-шифрування в реальному часі, 15+ МБ/с</p>
@@ -1064,7 +1068,7 @@
         <!-- 4. Receive -->
         <div class="gallery-card">
           <div class="gc-badge"><span class="gc-num">4</span><span class="gc-label" data-i18n="preview_cap4_title">Отримання</span></div>
-          <img src="/img/screen-receive.jpg" alt="SecureShare — Receiving" loading="lazy">
+          <img src="/img/screen-receive.jpg" alt="SecureShare — Receiving" loading="lazy" width="680" height="460">
           <div class="gc-caption">
             <h4 data-i18n="preview_cap4_title">Отримання</h4>
             <p data-i18n="preview_cap4_desc">Автоматична розшифровка та перевірка цілісності</p>
@@ -1369,7 +1373,7 @@
     </div>
   </footer>
 
-  <script src="/i18n.js"></script>
+  <script src="/i18n.js" defer></script>
 
 </body>
 </html>
