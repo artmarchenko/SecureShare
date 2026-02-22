@@ -772,6 +772,94 @@
       flex-wrap: wrap;
     }
 
+    /* ── Dark Theme ───────────────────────────────── */
+    [data-theme="dark"] {
+      --light: #111827;
+      --white: #1a1f2e;
+      --dark:  #E2E8F0;
+      --gray:  #94A3B8;
+    }
+    [data-theme="dark"] body { background: #0f1218; color: #E2E8F0; }
+    [data-theme="dark"] .features { background: #111827; }
+    [data-theme="dark"] .feature-card {
+      background: #1e2536;
+      border-color: rgba(255,255,255,.06);
+      box-shadow: 0 4px 24px rgba(0,0,0,.3);
+    }
+    [data-theme="dark"] .feature-card:hover { box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+    [data-theme="dark"] .feature-card h3 { color: #E2E8F0; }
+    [data-theme="dark"] .how-it-works { background: #0f1218; }
+    [data-theme="dark"] .step h3 { color: #E2E8F0; }
+    [data-theme="dark"] .faq { background: #111827; }
+    [data-theme="dark"] .faq-item {
+      background: #1e2536;
+      border-color: rgba(255,255,255,.06);
+    }
+    [data-theme="dark"] .faq-q { color: #E2E8F0; }
+    [data-theme="dark"] .faq-q:hover { color: #64B5F6; }
+    [data-theme="dark"] .cta {
+      background: linear-gradient(135deg, #1a2744 0%, #1e3a28 100%);
+    }
+    [data-theme="dark"] .cta h2 { color: #E2E8F0; }
+    [data-theme="dark"] .cta p { color: #94A3B8; }
+    [data-theme="dark"] .changelog { background: #0f1218; }
+    [data-theme="dark"] .tl-version { color: #E2E8F0; }
+    [data-theme="dark"] .tl-date { background: #1e2536; color: #94A3B8; }
+    [data-theme="dark"] .tl-changes li { color: #94A3B8; }
+    [data-theme="dark"] .tl-changes li::before { opacity: .8; }
+    [data-theme="dark"] .tl-dot { background: #1e2536; border-color: #3B82F6; }
+    [data-theme="dark"] .timeline::before { opacity: .5; }
+    [data-theme="dark"] .support {
+      background: linear-gradient(135deg, #2a1f0e 0%, #2a1a0e 50%, #2a0e14 100%);
+    }
+    [data-theme="dark"] .support .section-title { color: #FF8A65; }
+    [data-theme="dark"] .support-text { color: #D7CCC8; }
+    [data-theme="dark"] .support-text strong { color: #FF8A65; }
+    [data-theme="dark"] .support-item {
+      background: rgba(0,0,0,.3);
+      border-color: rgba(191,54,12,.15);
+    }
+    [data-theme="dark"] .support-item h4 { color: #D7CCC8; }
+    [data-theme="dark"] .support-item p { color: #A1887F; }
+    [data-theme="dark"] .support-note { color: #A1887F; }
+    [data-theme="dark"] footer {
+      border-top-color: #1e2536;
+      color: #64748B;
+    }
+
+    /* ── Theme Toggle Button ────────────────────── */
+    .theme-toggle {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 1000;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(11,25,41,.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,.15);
+      color: rgba(255,255,255,.7);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,.3);
+      transition: all .25s;
+    }
+    .theme-toggle:hover {
+      color: var(--white);
+      background: rgba(11,25,41,.98);
+      transform: scale(1.1);
+    }
+    .theme-toggle svg { width: 20px; height: 20px; }
+
+    @media (max-width: 768px) {
+      .theme-toggle { top: 12px; left: 12px; width: 38px; height: 38px; }
+      .theme-toggle svg { width: 17px; height: 17px; }
+    }
+
     /* ── Skip Link (a11y) ─────────────────────────── */
     .skip-link {
       position: absolute;
@@ -909,6 +997,14 @@
   </style>
 </head>
 <body>
+
+  <!-- Theme Toggle -->
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle dark mode">
+    <!-- Sun (shown in dark mode) -->
+    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    <!-- Moon (shown in light mode) -->
+    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
 
   <!-- Skip to content (a11y) -->
   <a href="#features" class="skip-link">Skip to content</a>

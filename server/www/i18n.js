@@ -302,6 +302,36 @@
   try { saved = localStorage.getItem('ss_lang') || 'uk'; } catch(e) {}
   if (saved !== 'uk') applyLang(saved);
 
+  /* ── Theme Toggle (dark / light) ─────────────── */
+  var themeBtn = document.getElementById('themeToggle');
+  var iconSun  = themeBtn ? themeBtn.querySelector('.icon-sun') : null;
+  var iconMoon = themeBtn ? themeBtn.querySelector('.icon-moon') : null;
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    if (iconSun && iconMoon) {
+      iconSun.style.display  = theme === 'dark' ? 'block' : 'none';
+      iconMoon.style.display = theme === 'dark' ? 'none'  : 'block';
+    }
+    try { localStorage.setItem('ss-theme', theme); } catch(e) {}
+  }
+
+  /* init: check saved pref or OS pref */
+  var savedTheme = null;
+  try { savedTheme = localStorage.getItem('ss-theme'); } catch(e) {}
+  if (savedTheme) {
+    applyTheme(savedTheme);
+  } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    applyTheme('dark');
+  }
+
+  if (themeBtn) {
+    themeBtn.addEventListener('click', function() {
+      var current = document.documentElement.getAttribute('data-theme');
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+  }
+
   /* ── Scroll Reveal (IntersectionObserver) ──────── */
   if ('IntersectionObserver' in window) {
     var revealObserver = new IntersectionObserver(function(entries) {
