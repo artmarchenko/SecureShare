@@ -321,6 +321,51 @@
         </div>
     </div>
 
+    <!-- Landing Analytics -->
+    <div class="section" style="padding-top: 8px;">
+        <h2>🌐 Landing Page Analytics</h2>
+        <div class="cards" style="padding: 0 0 16px 0;">
+            <div class="card">
+                <div class="card-label">Page Views (today)</div>
+                <div class="card-value" id="card-views-today">—</div>
+                <div class="card-sub" id="card-views-7d"></div>
+            </div>
+            <div class="card">
+                <div class="card-label">Unique Visitors (today)</div>
+                <div class="card-value" id="card-unique-today">—</div>
+                <div class="card-sub" id="card-unique-7d"></div>
+            </div>
+            <div class="card">
+                <div class="card-label">Downloads (total)</div>
+                <div class="card-value" id="card-downloads">—</div>
+                <div class="card-sub" id="card-downloads-today"></div>
+            </div>
+            <div class="card">
+                <div class="card-label">Conversion Rate</div>
+                <div class="card-value" id="card-conversion">—</div>
+                <div class="card-sub">views → downloads</div>
+            </div>
+        </div>
+        <div class="grid-2">
+            <div class="chart-box">
+                <h3>Daily Views & Unique Visitors (7 days)</h3>
+                <div class="chart-container"><canvas id="chart-landing-daily"></canvas></div>
+            </div>
+            <div class="chart-box">
+                <h3>Traffic Sources</h3>
+                <div class="chart-container"><canvas id="chart-referrers"></canvas></div>
+            </div>
+            <div class="chart-box">
+                <h3>Languages</h3>
+                <div class="chart-container"><canvas id="chart-languages"></canvas></div>
+            </div>
+            <div class="chart-box">
+                <h3>Screen Sizes</h3>
+                <div class="chart-container"><canvas id="chart-screens"></canvas></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Charts -->
     <div class="section">
         <h2>📊 Trends (last 48 hours)</h2>
@@ -502,6 +547,8 @@
                 apiFetch('/api/files'),
             ]);
             renderCards(stats);
+            renderLandingCards(stats.landing || {});
+            renderLandingCharts(stats.landing || {});
             renderHourlyCharts(stats.hourly);
             renderDistCharts(stats.distributions);
             renderErrors(stats.distributions.error_types);
@@ -535,6 +582,98 @@
         if (lt.success_rate_pct >= 90) el.style.color = 'var(--green)';
         else if (lt.success_rate_pct >= 70) el.style.color = 'var(--orange)';
         else el.style.color = 'var(--red)';
+    }
+
+    /* ═══ Landing Analytics Cards ═══ */
+    function renderLandingCards(landing) {
+        const viewsToday = landing.views_today || 0;
+        const views7d = landing.views_7d || 0;
+        const uniqueToday = landing.unique_today || 0;
+        const unique7d = landing.unique_7d || 0;
+        const downloadsTotal = landing.downloads_total || 0;
+        const downloadsToday = landing.downloads_today || 0;
+
+        document.getElementById('card-views-today').textContent = viewsToday.toLocaleString();
+        document.getElementById('card-views-7d').textContent = views7d.toLocaleString() + ' (7d)';
+        document.getElementById('card-unique-today').textContent = uniqueToday.toLocaleString();
+        document.getElementById('card-unique-7d').textContent = unique7d.toLocaleString() + ' (7d)';
+        document.getElementById('card-downloads').textContent = downloadsTotal.toLocaleString();
+        document.getElementById('card-downloads-today').textContent = downloadsToday + ' today';
+
+        const conversion = views7d > 0 ? ((downloadsTotal / views7d) * 100).toFixed(1) : '0.0';
+        const convEl = document.getElementById('card-conversion');
+        convEl.textContent = conversion + '%';
+        if (parseFloat(conversion) >= 5) convEl.style.color = 'var(--green)';
+        else if (parseFloat(conversion) >= 1) convEl.style.color = 'var(--orange)';
+        else convEl.style.color = 'var(--text2)';
+    }
+
+    /* ═══ Landing Analytics Charts ═══ */
+    function renderLandingCharts(landing) {
+        const daily = landing.daily || {};
+        const dist = landing.distributions || {};
+
+        /* Daily views + unique visitors */
+        const dayLabels = Object.keys(daily).map(d => d.slice(5)); /* MM-DD */
+        const dayViews = Object.values(daily).map(d => d.views || 0);
+        const dayUnique = Object.values(daily).map(d => d.unique || 0);
+        const dayDownloads = Object.values(daily).map(d => d.downloads || 0);
+
+        if (charts['landing-daily']) charts['landing-daily'].destroy();
+        charts['landing-daily'] = new Chart(document.getElementById('chart-landing-daily'), {
+            type: 'bar',
+            data: {
+                labels: dayLabels.length ? dayLabels : ['No data'],
+                datasets: [
+                    {
+                        label: 'Views',
+                        data: dayViews.length ? dayViews : [0],
+                        backgroundColor: 'rgba(108,92,231,0.6)',
+                        borderRadius: 4,
+                    },
+                    {
+                        label: 'Unique',
+                        data: dayUnique.length ? dayUnique : [0],
+                        backgroundColor: 'rgba(0,184,148,0.5)',
+                        borderRadius: 4,
+                    },
+                    {
+                        label: 'Downloads',
+                        data: dayDownloads.length ? dayDownloads : [0],
+                        backgroundColor: 'rgba(253,203,110,0.6)',
+                        borderRadius: 4,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: '#8b90a0', font: { size: 11 } }
+                    }
+                },
+                scales: {
+                    x: { ticks: { color: '#8b90a0' }, grid: { color: '#2e3348' } },
+                    y: { ticks: { color: '#8b90a0' }, grid: { color: '#2e3348' }, beginAtZero: true }
+                }
+            }
+        });
+
+        /* Referrers */
+        const refLabels = Object.keys(dist.referrers || {});
+        const refData = Object.values(dist.referrers || {});
+        makePie('chart-referrers', refLabels.length ? refLabels : ['No data'], refData.length ? refData : [1]);
+
+        /* Languages */
+        const langLabels = Object.keys(dist.languages || {});
+        const langData = Object.values(dist.languages || {});
+        makePie('chart-languages', langLabels.length ? langLabels : ['No data'], langData.length ? langData : [1]);
+
+        /* Screen sizes */
+        const scrLabels = Object.keys(dist.screen_sizes || {});
+        const scrData = Object.values(dist.screen_sizes || {});
+        makePie('chart-screens', scrLabels.length ? scrLabels : ['No data'], scrData.length ? scrData : [1]);
     }
 
     /* ═══ Hourly Charts ═══ */

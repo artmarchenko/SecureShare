@@ -16,6 +16,7 @@ Security:
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
@@ -585,6 +586,216 @@ def _duration_bucket(seconds: float) -> str:
         return "30-60min"
     else:
         return "60min+"
+
+
+# ══════════════════════════════════════════════════════════════════
+#  LandingAnalytics — page views, unique visitors, downloads
+# ══════════════════════════════════════════════════════════════════
+
+# Rate limits for landing analytics
+PAGE_VIEW_RATE_LIMIT = 30    # max page_view events per IP per hour
+DOWNLOAD_RATE_LIMIT = 10     # max download_track events per IP per hour
+
+
+class LandingAnalytics:
+    """Privacy-respecting analytics for the landing page.
+
+    Tracked metrics:
+      - Page views (total + daily)
+      - Unique daily visitors (hashed IP → daily set, no PII stored)
+      - Referrer distribution (domain only, not full URL)
+      - Language distribution (user-selected lang on landing)
+      - Screen size distribution (bucketed: mobile / tablet / desktop)
+      - Downloads per asset (windows / linux)
+      - Download sources (direct / landing-button / github)
+
+    Privacy:
+      - IPs are hashed with daily rotating salt (SHA-256)
+      - No cookies, no persistent user IDs
+      - Referrers are stripped to domain only
+      - Screen sizes are bucketed, not exact
+    """
+
+    def __init__(self, data_dir: Path):
+        self._writer = JSONLWriter("landing", data_dir)
+        self._start_time = time.monotonic()
+
+        # ── Page view counters ────────────────────────────────
+        self._total_views = 0
+        self._daily_views: dict[str, int] = defaultdict(int)
+
+        # ── Unique visitors (hashed IP per day) ───────────────
+        self._daily_visitors: dict[str, set] = defaultdict(set)
+        self._daily_salt = os.urandom(32)  # rotated daily
+        self._salt_day = _day_key()
+
+        # ── Distributions ─────────────────────────────────────
+        self._referrers: dict[str, int] = defaultdict(int)
+        self._languages: dict[str, int] = defaultdict(int)
+        self._screen_sizes: dict[str, int] = defaultdict(int)
+
+        # ── Download counters ─────────────────────────────────
+        self._downloads_total = 0
+        self._downloads_by_asset: dict[str, int] = defaultdict(int)
+        self._downloads_by_source: dict[str, int] = defaultdict(int)
+        self._daily_downloads: dict[str, int] = defaultdict(int)
+
+    def _rotate_salt_if_needed(self) -> None:
+        """Rotate the hashing salt daily for privacy."""
+        today = _day_key()
+        if today != self._salt_day:
+            self._daily_salt = os.urandom(32)
+            self._salt_day = today
+
+    def _hash_ip(self, ip: str) -> str:
+        """Hash IP with daily salt — not reversible, not linkable across days."""
+        self._rotate_salt_if_needed()
+        return hashlib.sha256(
+            self._daily_salt + ip.encode()
+        ).hexdigest()[:16]
+
+    def _extract_domain(self, referrer: str) -> str:
+        """Extract domain from referrer URL for privacy."""
+        if not referrer:
+            return "direct"
+        ref = _sanitize_str(referrer, 500)
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(ref)
+            domain = parsed.netloc or parsed.path.split("/")[0]
+            # Strip www. prefix
+            if domain.startswith("www."):
+                domain = domain[4:]
+            return domain[:100] if domain else "direct"
+        except Exception:
+            return "unknown"
+
+    @staticmethod
+    def _screen_bucket(width: int) -> str:
+        """Bucket screen width for privacy."""
+        if width <= 0:
+            return "unknown"
+        elif width < 768:
+            return "mobile"
+        elif width < 1024:
+            return "tablet"
+        elif width < 1440:
+            return "desktop"
+        else:
+            return "desktop-large"
+
+    def record_page_view(self, ip: str, referrer: str = "",
+                         lang: str = "", screen_w: int = 0) -> None:
+        """Record a landing page view."""
+        today = _day_key()
+
+        self._total_views += 1
+        self._daily_views[today] += 1
+
+        # Unique visitor tracking (hashed IP)
+        hashed = self._hash_ip(ip)
+        self._daily_visitors[today].add(hashed)
+
+        # Distributions
+        domain = self._extract_domain(referrer)
+        _safe_incr(self._referrers, domain)
+
+        if lang:
+            safe_lang = _sanitize_str(lang, 10).lower()
+            _safe_incr(self._languages, safe_lang)
+
+        if screen_w > 0:
+            bucket = self._screen_bucket(screen_w)
+            _safe_incr(self._screen_sizes, bucket)
+
+    def record_download(self, ip: str, asset: str = "windows",
+                        source: str = "landing") -> None:
+        """Record a download event."""
+        today = _day_key()
+
+        self._downloads_total += 1
+        self._daily_downloads[today] += 1
+
+        safe_asset = _sanitize_str(asset, 20).lower()
+        safe_source = _sanitize_str(source, 20).lower()
+
+        _safe_incr(self._downloads_by_asset, safe_asset)
+        _safe_incr(self._downloads_by_source, safe_source)
+
+    def get_summary(self) -> dict:
+        """Return landing analytics summary."""
+        today = _day_key()
+
+        # Calculate unique visitors for today and last 7 days
+        unique_today = len(self._daily_visitors.get(today, set()))
+        unique_7d = sum(
+            len(visitors)
+            for day, visitors in self._daily_visitors.items()
+        )
+
+        # Views for last 7 days
+        views_7d = sum(self._daily_views.values())
+
+        # Daily breakdown (last 7 days)
+        sorted_days = sorted(self._daily_views.keys())[-7:]
+        daily = {}
+        for day in sorted_days:
+            daily[day] = {
+                "views": self._daily_views.get(day, 0),
+                "unique": len(self._daily_visitors.get(day, set())),
+                "downloads": self._daily_downloads.get(day, 0),
+            }
+
+        return {
+            "total_views": self._total_views,
+            "views_today": self._daily_views.get(today, 0),
+            "views_7d": views_7d,
+            "unique_today": unique_today,
+            "unique_7d": unique_7d,
+            "downloads_total": self._downloads_total,
+            "downloads_today": self._daily_downloads.get(today, 0),
+            "daily": daily,
+            "distributions": {
+                "referrers": dict(
+                    sorted(self._referrers.items(),
+                           key=lambda x: x[1], reverse=True)[:20]
+                ),
+                "languages": dict(self._languages),
+                "screen_sizes": dict(self._screen_sizes),
+                "downloads_by_asset": dict(self._downloads_by_asset),
+                "downloads_by_source": dict(self._downloads_by_source),
+            },
+        }
+
+    def flush(self) -> None:
+        """Flush current landing stats to JSONL."""
+        record = {
+            "ts": _now_iso(),
+            "day": _day_key(),
+            "total_views": self._total_views,
+            "downloads_total": self._downloads_total,
+            "daily_views": dict(self._daily_views),
+            "daily_downloads": dict(self._daily_downloads),
+            "daily_unique": {
+                day: len(visitors)
+                for day, visitors in self._daily_visitors.items()
+            },
+            "referrers": dict(self._referrers),
+            "languages": dict(self._languages),
+            "screen_sizes": dict(self._screen_sizes),
+        }
+        self._writer.append(record)
+        self._purge_old_days()
+
+    def _purge_old_days(self) -> None:
+        """Keep only last 30 days of daily data in memory."""
+        cutoff = 30
+        for store in (self._daily_views, self._daily_visitors,
+                      self._daily_downloads):
+            keys = sorted(store.keys())
+            if len(keys) > cutoff:
+                for k in keys[:-cutoff]:
+                    del store[k]
 
 
 # ══════════════════════════════════════════════════════════════════

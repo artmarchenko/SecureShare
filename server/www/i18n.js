@@ -478,4 +478,49 @@
       }, 80);
     });
   }
+
+  /* ══════════════════════════════════════════════════
+     Analytics Beacon — lightweight, privacy-respecting
+     No cookies, no persistent IDs, no PII
+     ══════════════════════════════════════════════════ */
+
+  function beacon(url, data) {
+    /* fire-and-forget — no error handling needed */
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, JSON.stringify(data));
+      } else {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify(data));
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  /* Page view — fires once on load */
+  (function() {
+    var lang = 'uk';
+    try { lang = localStorage.getItem('ss_lang') || 'uk'; } catch(e) {}
+    beacon('/api/page_view', {
+      referrer: document.referrer || '',
+      lang: lang,
+      screen_w: window.innerWidth || 0
+    });
+  })();
+
+  /* Download tracking — fires on every download link click */
+  var dlLinks = document.querySelectorAll('a[href^="/download/"]');
+  for (var dl = 0; dl < dlLinks.length; dl++) {
+    (function(link) {
+      link.addEventListener('click', function() {
+        var href = link.getAttribute('href') || '';
+        var asset = href.indexOf('linux') !== -1 ? 'linux' : 'windows';
+        beacon('/api/download_track', {
+          asset: asset,
+          source: 'landing'
+        });
+      });
+    })(dlLinks[dl]);
+  }
 })();

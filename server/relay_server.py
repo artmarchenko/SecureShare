@@ -40,12 +40,15 @@ import websockets.server
 from analytics import (
     StatsCollector,
     CrashStore,
+    LandingAnalytics,
     APIRateLimiter,
     verify_admin_key,
     send_telegram_alert,
     DATA_DIR,
     CRASH_RATE_LIMIT,
     TELEMETRY_RATE_LIMIT,
+    PAGE_VIEW_RATE_LIMIT,
+    DOWNLOAD_RATE_LIMIT,
     MAX_CRASH_BODY,
     MAX_TELEMETRY_BODY,
 )
@@ -171,15 +174,19 @@ class HTTPRouter:
       GET  /health               — health check (public)
       POST /api/crash            — crash report (rate-limited)
       POST /api/telemetry        — telemetry event (rate-limited)
+      POST /api/page_view        — landing page view (rate-limited, public)
+      POST /api/download_track   — download event (rate-limited, public)
       GET  /api/stats?key=...    — full stats (admin)
       GET  /api/crashes?key=...  — grouped crashes (admin)
       GET  /api/logs?key=...&file=...  — download JSONL (admin)
       GET  /api/files?key=...    — list log files (admin)
     """
 
-    def __init__(self, stats: StatsCollector, crashes: CrashStore):
+    def __init__(self, stats: StatsCollector, crashes: CrashStore,
+                 landing: LandingAnalytics):
         self._stats = stats
         self._crashes = crashes
+        self._landing = landing
         self._api_limiter = APIRateLimiter()
 
     async def handle(
@@ -207,6 +214,10 @@ class HTTPRouter:
                 await self._handle_crash(writer, body, ip)
             elif method == "POST" and path == "/api/telemetry":
                 await self._handle_telemetry(writer, body, ip)
+            elif method == "POST" and path == "/api/page_view":
+                await self._handle_page_view(writer, body, ip)
+            elif method == "POST" and path == "/api/download_track":
+                await self._handle_download_track(writer, body, ip)
             elif method == "GET" and path == "/api/stats":
                 await self._handle_stats(writer, query, ip)
             elif method == "GET" and path == "/api/crashes":
@@ -320,10 +331,61 @@ class HTTPRouter:
         self._stats.record_client_event(data)
         await _send_response(writer, 201, {"status": "received"})
 
+    async def _handle_page_view(self, writer, body: str, ip: str) -> None:
+        """Record a landing page view (public, rate-limited)."""
+        if not self._api_limiter.check(ip, PAGE_VIEW_RATE_LIMIT):
+            await _send_response(writer, 429,
+                                 {"error": "rate limit exceeded"})
+            return
+        if len(body) > 1024:  # 1 KB max for page_view
+            await _send_response(writer, 413,
+                                 {"error": "body too large"})
+            return
+        try:
+            data = json.loads(body) if body.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            data = {}
+
+        referrer = str(data.get("referrer", ""))[:500]
+        lang = str(data.get("lang", ""))[:10]
+        screen_w = 0
+        try:
+            screen_w = int(data.get("screen_w", 0))
+        except (TypeError, ValueError):
+            pass
+
+        self._landing.record_page_view(
+            ip=ip, referrer=referrer, lang=lang, screen_w=screen_w
+        )
+        await _send_response(writer, 201, {"status": "ok"})
+
+    async def _handle_download_track(self, writer, body: str,
+                                     ip: str) -> None:
+        """Record a download event (public, rate-limited)."""
+        if not self._api_limiter.check(ip, DOWNLOAD_RATE_LIMIT):
+            await _send_response(writer, 429,
+                                 {"error": "rate limit exceeded"})
+            return
+        if len(body) > 512:
+            await _send_response(writer, 413,
+                                 {"error": "body too large"})
+            return
+        try:
+            data = json.loads(body) if body.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            data = {}
+
+        asset = str(data.get("asset", "windows"))[:20]
+        source = str(data.get("source", "landing"))[:20]
+
+        self._landing.record_download(ip=ip, asset=asset, source=source)
+        await _send_response(writer, 201, {"status": "ok"})
+
     async def _handle_stats(self, writer, query: dict, ip: str) -> None:
         if not await self._check_admin(writer, query, ip):
             return
         summary = self._stats.get_summary()
+        summary["landing"] = self._landing.get_summary()
         await _send_response(writer, 200, summary)
 
     async def _handle_crashes(self, writer, query: dict, ip: str) -> None:
@@ -511,7 +573,9 @@ class RelayServer:
         # Analytics
         self._analytics = StatsCollector(DATA_DIR)
         self._crashes = CrashStore(DATA_DIR)
-        self._http_router = HTTPRouter(self._analytics, self._crashes)
+        self._landing = LandingAnalytics(DATA_DIR)
+        self._http_router = HTTPRouter(self._analytics, self._crashes,
+                                       self._landing)
 
     async def start(self) -> None:
         log.info("SecureShare Relay Server starting on %s:%d", LISTEN_HOST, LISTEN_PORT)
@@ -791,11 +855,13 @@ class RelayServer:
             try:
                 await asyncio.sleep(3600)
                 self._analytics.flush_hourly()
+                self._landing.flush()
                 log.info("Analytics flushed to disk")
             except asyncio.CancelledError:
                 # Flush before shutdown
                 try:
                     self._analytics.flush_hourly()
+                    self._landing.flush()
                 except Exception:
                     pass
                 raise
@@ -847,6 +913,7 @@ def main():
                     pass
         # Final analytics flush
         server._analytics.flush_hourly()
+        server._landing.flush()
         log.info("Server stopped gracefully. Stats: %s", server._stats_basic)
 
     try:
