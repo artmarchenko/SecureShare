@@ -302,6 +302,28 @@
   try { saved = localStorage.getItem('ss_lang') || 'uk'; } catch(e) {}
   if (saved !== 'uk') applyLang(saved);
 
+  /* ── Scroll Reveal (IntersectionObserver) ──────── */
+  if ('IntersectionObserver' in window) {
+    var revealObserver = new IntersectionObserver(function(entries) {
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i].isIntersecting) {
+          entries[i].target.classList.add('visible');
+          revealObserver.unobserve(entries[i].target);
+        }
+      }
+    }, { threshold: 0.15 });
+    var fadeEls = document.querySelectorAll('.fade-up');
+    for (var i = 0; i < fadeEls.length; i++) {
+      revealObserver.observe(fadeEls[i]);
+    }
+  } else {
+    /* fallback: show everything if IO unsupported */
+    var fadeEls2 = document.querySelectorAll('.fade-up');
+    for (var i = 0; i < fadeEls2.length; i++) {
+      fadeEls2[i].classList.add('visible');
+    }
+  }
+
   /* ── FAQ Accordion ──────────────────────────────── */
   var faqItems = document.querySelectorAll('.faq-item');
   for (var f = 0; f < faqItems.length; f++) {
