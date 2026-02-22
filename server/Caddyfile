@@ -82,7 +82,7 @@ secureshare-relay.duckdns.org {
 
 	# Landing page — static site (everything else)
 	handle {
-		header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'"
+		header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'"
 		# Cache static assets (images, JS, icons)
 		@static path *.png *.jpg *.jpeg *.gif *.webp *.ico *.js *.css *.svg *.woff2
 		header @static Cache-Control "public, max-age=604800, immutable"

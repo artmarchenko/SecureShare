@@ -275,7 +275,8 @@
   function cacheUk() {
     var els = document.querySelectorAll('[data-i18n]');
     for (var i = 0; i < els.length; i++) {
-      ukTexts[els[i].getAttribute('data-i18n')] = els[i].innerHTML;
+      var isHtml = els[i].hasAttribute('data-i18n-html');
+      ukTexts[els[i].getAttribute('data-i18n')] = isHtml ? els[i].innerHTML : els[i].textContent;
     }
   }
 
@@ -283,10 +284,15 @@
     var els = document.querySelectorAll('[data-i18n]');
     for (var i = 0; i < els.length; i++) {
       var key = els[i].getAttribute('data-i18n');
+      var isHtml = els[i].hasAttribute('data-i18n-html');
       if (lang === 'uk') {
-        if (ukTexts[key]) els[i].innerHTML = ukTexts[key];
+        if (ukTexts[key]) {
+          if (isHtml) els[i].innerHTML = ukTexts[key];
+          else els[i].textContent = ukTexts[key];
+        }
       } else if (T[lang] && T[lang][key]) {
-        els[i].innerHTML = T[lang][key];
+        if (isHtml) els[i].innerHTML = T[lang][key];
+        else els[i].textContent = T[lang][key];
       }
     }
     document.documentElement.lang = LANG_CODES[lang] || lang;

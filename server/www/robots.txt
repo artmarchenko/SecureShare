@@ -3,5 +3,6 @@ Allow: /
 Disallow: /api/
 Disallow: /admin
 Disallow: /health
+Disallow: /download/
 
 Sitemap: https://secureshare-relay.duckdns.org/sitemap.xml
