@@ -866,6 +866,17 @@ class LandingAnalytics:
             return len(live_set)
         return self._daily_unique_counts.get(day, 0)
 
+    def _merged_unique_counts(self) -> dict[str, int]:
+        """Merge live sets with restored counts for flush.
+
+        Live sets take priority over restored counts.
+        """
+        merged = dict(self._daily_unique_counts)
+        for day, visitors in self._daily_visitors.items():
+            if visitors:  # live set has data
+                merged[day] = len(visitors)
+        return merged
+
     def get_summary(self) -> dict:
         """Return landing analytics summary."""
         today = _day_key()
@@ -925,10 +936,7 @@ class LandingAnalytics:
             "downloads_total": self._downloads_total,
             "daily_views": dict(self._daily_views),
             "daily_downloads": dict(self._daily_downloads),
-            "daily_unique": {
-                day: len(visitors)
-                for day, visitors in self._daily_visitors.items()
-            },
+            "daily_unique": self._merged_unique_counts(),
             "referrers": dict(self._referrers),
             "languages": dict(self._languages),
             "screen_sizes": dict(self._screen_sizes),
