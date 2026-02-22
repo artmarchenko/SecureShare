@@ -90,6 +90,20 @@
       preview_cap3_desc: "Real-time E2E encryption, 15+ MB/s",
       preview_cap4_title: "Receiving",
       preview_cap4_desc: "Automatic decryption and integrity check",
+      faq_title: "Frequently Asked Questions",
+      faq_sub: "Answers to the most common questions about SecureShare",
+      faq_q1: "Are my files really encrypted?",
+      faq_a1: "Yes. Every file is encrypted on the sender\u2019s device using AES-256-GCM with a unique key generated via X25519. The relay server only sees encrypted data and has no way to decrypt it.",
+      faq_q2: "What is the maximum file size?",
+      faq_a2: "Up to 5 GB. Files are transferred in 256 KB chunks with interrupted transfer resumption \u2014 even if the connection drops, you don\u2019t need to start over.",
+      faq_q3: "Is registration required?",
+      faq_a3: "No. Just download the app, choose a file, and share the session code with the recipient. No account, email, or phone needed.",
+      faq_q4: "What is the verification code?",
+      faq_a4: "After connecting, both participants see the same 8-character code. If the codes match \u2014 the connection is secure. This protects against man-in-the-middle (MITM) attacks.",
+      faq_q5: "Which operating systems are supported?",
+      faq_a5: "Windows 10/11 and Linux (x64). The app requires no installation \u2014 just download and run.",
+      faq_q6: "Are files stored on the server?",
+      faq_a6: "No. The relay server only forwards encrypted packets between participants in real time. After the transfer is complete \u2014 zero traces. Session codes are hashed and not logged.",
       all_releases: "All releases on GitHub",
       support_title: "Support the project",
       support_text1: "SecureShare is a <strong>free open-source project</strong> created by one person in their spare time. Server, domain, and development cost money, and motivation needs your support.",
@@ -102,6 +116,7 @@
       support_dev_desc: "New platforms and features",
       support_btn: "Buy me a coffee",
       support_note: "You can also star us on <a href=\"https://github.com/artmarchenko/SecureShare\" target=\"_blank\" rel=\"noopener\">GitHub</a> \u2014 it\u2019s free and very motivating!",
+      footer_faq: "FAQ",
       footer_docs: "Documentation",
       footer_devs: "For developers",
       footer_changelog: "What\u2019s new",
@@ -198,6 +213,20 @@
       preview_cap3_desc: "Echtzeit-E2E-Verschl\u00fcsselung, 15+ MB/s",
       preview_cap4_title: "Empfangen",
       preview_cap4_desc: "Automatische Entschl\u00fcsselung und Integrit\u00e4tspr\u00fcfung",
+      faq_title: "H\u00e4ufig gestellte Fragen",
+      faq_sub: "Antworten auf die h\u00e4ufigsten Fragen zu SecureShare",
+      faq_q1: "Werden meine Dateien wirklich verschl\u00fcsselt?",
+      faq_a1: "Ja. Jede Datei wird auf dem Ger\u00e4t des Absenders mit AES-256-GCM und einem \u00fcber X25519 erzeugten Schl\u00fcssel verschl\u00fcsselt. Der Relay-Server sieht nur verschl\u00fcsselte Daten und kann sie nicht entschl\u00fcsseln.",
+      faq_q2: "Wie gro\u00df darf eine Datei maximal sein?",
+      faq_a2: "Bis zu 5 GB. Dateien werden in 256-KB-Bl\u00f6cken \u00fcbertragen, mit Wiederaufnahme unterbrochener \u00dcbertragungen \u2014 selbst bei Verbindungsabbruch muss nicht von vorne begonnen werden.",
+      faq_q3: "Ist eine Registrierung erforderlich?",
+      faq_a3: "Nein. Laden Sie einfach die App herunter, w\u00e4hlen Sie eine Datei und teilen Sie den Sitzungscode mit dem Empf\u00e4nger. Kein Konto, keine E-Mail, kein Telefon n\u00f6tig.",
+      faq_q4: "Was ist der Verifizierungscode?",
+      faq_a4: "Nach der Verbindung sehen beide Teilnehmer denselben 8-stelligen Code. Stimmen die Codes \u00fcberein, ist die Verbindung sicher. Dies sch\u00fctzt vor Man-in-the-Middle-Angriffen (MITM).",
+      faq_q5: "Welche Betriebssysteme werden unterst\u00fctzt?",
+      faq_a5: "Windows 10/11 und Linux (x64). Die App erfordert keine Installation \u2014 einfach herunterladen und starten.",
+      faq_q6: "Werden Dateien auf dem Server gespeichert?",
+      faq_a6: "Nein. Der Relay-Server leitet nur verschl\u00fcsselte Pakete in Echtzeit zwischen den Teilnehmern weiter. Nach Abschluss der \u00dcbertragung \u2014 null Spuren. Sitzungscodes werden gehasht und nicht protokolliert.",
       all_releases: "Alle Releases auf GitHub",
       support_title: "Unterst\u00fctzen Sie das Projekt",
       support_text1: "SecureShare ist ein <strong>kostenloses Open-Source-Projekt</strong>, das von einer Person in der Freizeit entwickelt wird. Server, Domain und Entwicklung kosten Geld, und Motivation braucht Ihre Unterst\u00fctzung.",
@@ -210,6 +239,7 @@
       support_dev_desc: "Neue Plattformen und Features",
       support_btn: "Einen Kaffee spendieren",
       support_note: "Sie k\u00f6nnen uns auch einen Stern auf <a href=\"https://github.com/artmarchenko/SecureShare\" target=\"_blank\" rel=\"noopener\">GitHub</a> geben \u2014 das ist kostenlos und sehr motivierend!",
+      footer_faq: "FAQ",
       footer_docs: "Dokumentation",
       footer_devs: "F\u00fcr Entwickler",
       footer_changelog: "Was gibt\u2019s Neues",
@@ -271,6 +301,25 @@
   var saved = 'uk';
   try { saved = localStorage.getItem('ss_lang') || 'uk'; } catch(e) {}
   if (saved !== 'uk') applyLang(saved);
+
+  /* ── FAQ Accordion ──────────────────────────────── */
+  var faqItems = document.querySelectorAll('.faq-item');
+  for (var f = 0; f < faqItems.length; f++) {
+    (function(item) {
+      var btn = item.querySelector('.faq-q');
+      if (btn) {
+        btn.addEventListener('click', function() {
+          var isOpen = item.classList.contains('open');
+          /* close all */
+          for (var k = 0; k < faqItems.length; k++) {
+            faqItems[k].classList.remove('open');
+          }
+          /* toggle clicked */
+          if (!isOpen) item.classList.add('open');
+        });
+      }
+    })(faqItems[f]);
+  }
 
   /* ── Gallery Carousel ─────────────────────────── */
   var track = document.getElementById('galTrack');

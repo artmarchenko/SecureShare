@@ -438,6 +438,72 @@
       padding: 18px 48px;
     }
 
+    /* ── FAQ ─────────────────────────────────────── */
+    .faq { padding: 100px 0; background: var(--light); }
+    .faq-list {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .faq-item {
+      background: var(--white);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.04);
+      border: 1px solid rgba(0,0,0,.05);
+      overflow: hidden;
+    }
+    .faq-q {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-align: left;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--dark);
+      font-family: inherit;
+      line-height: 1.5;
+      transition: color .2s;
+    }
+    .faq-q:hover { color: var(--blue); }
+    .faq-q .faq-chevron {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+      margin-left: 16px;
+      color: var(--gray);
+      transition: transform .3s;
+    }
+    .faq-item.open .faq-q .faq-chevron {
+      transform: rotate(180deg);
+    }
+    .faq-a {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .35s ease, padding .35s ease;
+      padding: 0 24px;
+    }
+    .faq-item.open .faq-a {
+      max-height: 300px;
+      padding: 0 24px 20px;
+    }
+    .faq-a p {
+      font-size: .95rem;
+      color: var(--gray);
+      line-height: 1.7;
+    }
+
+    @media (max-width: 768px) {
+      .faq { padding: 60px 0; }
+      .faq-q { padding: 16px 18px; font-size: .95rem; }
+      .faq-a { padding: 0 18px; }
+      .faq-item.open .faq-a { padding: 0 18px 16px; }
+    }
+
     /* ── Changelog / Timeline ────────────────────── */
     .changelog {
       padding: 100px 0;
@@ -1017,6 +1083,65 @@
     </div>
   </section>
 
+  <!-- FAQ -->
+  <section class="faq" id="faq">
+    <div class="container">
+      <h2 class="section-title" data-i18n="faq_title">Часті запитання</h2>
+      <p class="section-sub" data-i18n="faq_sub">Відповіді на найпопулярніші питання про SecureShare</p>
+      <div class="faq-list">
+
+        <div class="faq-item">
+          <button class="faq-q" type="button">
+            <span data-i18n="faq_q1">Чи дійсно мої файли шифруються?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="faq-a"><p data-i18n="faq_a1">Так. Кожен файл шифрується на пристрої відправника за допомогою AES-256-GCM з унікальним ключем, створеним через X25519. Relay-сервер бачить лише зашифровані дані і не має можливості їх розшифрувати.</p></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" type="button">
+            <span data-i18n="faq_q2">Який максимальний розмір файлу?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="faq-a"><p data-i18n="faq_a2">До 5 ГБ. Файли передаються чанками по 256 КБ з можливістю відновлення перерваної передачі — навіть якщо з'єднання обірвалось, не потрібно починати спочатку.</p></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" type="button">
+            <span data-i18n="faq_q3">Чи потрібна реєстрація?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="faq-a"><p data-i18n="faq_a3">Ні. Просто завантажте програму, оберіть файл і поділіться кодом сесії з отримувачем. Жодного акаунту, email чи телефону.</p></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" type="button">
+            <span data-i18n="faq_q4">Що таке код верифікації?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="faq-a"><p data-i18n="faq_a4">Після з'єднання обидва учасники бачать однаковий 8-символьний код. Якщо коди співпадають — з'єднання безпечне. Це захист від атаки «людина посередині» (MITM).</p></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" type="button">
+            <span data-i18n="faq_q5">Які операційні системи підтримуються?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="faq-a"><p data-i18n="faq_a5">Windows 10/11 та Linux (x64). Програма не потребує встановлення — просто завантажте і запустіть.</p></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" type="button">
+            <span data-i18n="faq_q6">Чи зберігаються файли на сервері?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="faq-a"><p data-i18n="faq_a6">Ні. Relay-сервер лише пересилає зашифровані пакети між учасниками в реальному часі. Після завершення передачі — нуль слідів. Коди сесій хешуються і не логуються.</p></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
   <!-- Changelog -->
   <section class="changelog" id="changelog">
     <div class="container">
@@ -1166,6 +1291,7 @@
         <a href="https://github.com/artmarchenko/SecureShare" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/USER_GUIDE.md" target="_blank" rel="noopener" data-i18n="footer_docs">Документація</a>
         <a href="https://github.com/artmarchenko/SecureShare/blob/main/DEVELOPER.md" target="_blank" rel="noopener" data-i18n="footer_devs">Для розробників</a>
+        <a href="#faq" data-i18n="footer_faq">FAQ</a>
         <a href="#changelog" data-i18n="footer_changelog">Що нового</a>
         <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener" data-i18n="footer_bug">Повідомити про баг</a>
         <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener" data-i18n="footer_support">☕ Підтримати</a>
