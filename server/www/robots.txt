@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /health
+
+Sitemap: https://secureshare-relay.duckdns.org/sitemap.xml
