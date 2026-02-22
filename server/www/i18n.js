@@ -116,6 +116,13 @@
       support_dev_desc: "New platforms and features",
       support_btn: "Buy me a coffee",
       support_note: "You can also star us on <a href=\"https://github.com/artmarchenko/SecureShare\" target=\"_blank\" rel=\"noopener\">GitHub</a> \u2014 it\u2019s free and very motivating!",
+      nav_features: "Features",
+      nav_how: "How it works",
+      nav_preview: "Demo",
+      nav_security: "Security",
+      nav_faq: "FAQ",
+      nav_changelog: "Versions",
+      nav_support: "Support",
       footer_faq: "FAQ",
       footer_docs: "Documentation",
       footer_devs: "For developers",
@@ -239,6 +246,13 @@
       support_dev_desc: "Neue Plattformen und Features",
       support_btn: "Einen Kaffee spendieren",
       support_note: "Sie k\u00f6nnen uns auch einen Stern auf <a href=\"https://github.com/artmarchenko/SecureShare\" target=\"_blank\" rel=\"noopener\">GitHub</a> geben \u2014 das ist kostenlos und sehr motivierend!",
+      nav_features: "Funktionen",
+      nav_how: "Wie es funktioniert",
+      nav_preview: "Demo",
+      nav_security: "Sicherheit",
+      nav_faq: "FAQ",
+      nav_changelog: "Versionen",
+      nav_support: "Unterst\u00fctzung",
       footer_faq: "FAQ",
       footer_docs: "Dokumentation",
       footer_devs: "F\u00fcr Entwickler",
@@ -301,6 +315,33 @@
   var saved = 'uk';
   try { saved = localStorage.getItem('ss_lang') || 'uk'; } catch(e) {}
   if (saved !== 'uk') applyLang(saved);
+
+  /* ── Sticky Nav: scroll shadow + active link ──── */
+  var siteNav = document.getElementById('siteNav');
+  var navLinks = siteNav ? siteNav.querySelectorAll('a[href^="#"]') : [];
+  var navSections = [];
+  for (var n = 0; n < navLinks.length; n++) {
+    var target = document.querySelector(navLinks[n].getAttribute('href'));
+    if (target) navSections.push({ link: navLinks[n], el: target });
+  }
+
+  function updateNav() {
+    if (siteNav) {
+      if (window.scrollY > 10) siteNav.classList.add('scrolled');
+      else siteNav.classList.remove('scrolled');
+    }
+    var scrollPos = window.scrollY + 120;
+    var activeIdx = 0;
+    for (var s = 0; s < navSections.length; s++) {
+      if (navSections[s].el.offsetTop <= scrollPos) activeIdx = s;
+    }
+    for (var s = 0; s < navSections.length; s++) {
+      if (s === activeIdx) navSections[s].link.classList.add('active');
+      else navSections[s].link.classList.remove('active');
+    }
+  }
+  window.addEventListener('scroll', updateNav, { passive: true });
+  updateNav();
 
   /* ── Theme Toggle (dark / light) ─────────────── */
   var themeBtn = document.getElementById('themeToggle');

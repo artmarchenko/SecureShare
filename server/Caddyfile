@@ -70,9 +70,27 @@ secureshare-relay.duckdns.org {
 		}
 	}
 
+	# Custom 404 error page
+	handle_errors {
+		@404 expression {err.status_code} == 404
+		handle @404 {
+			root * /www
+			rewrite * /404.html
+			file_server
+		}
+	}
+
 	# Landing page — static site (everything else)
 	handle {
 		header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'"
+		# Cache static assets (images, JS, icons)
+		@static path *.png *.jpg *.jpeg *.gif *.webp *.ico *.js *.css *.svg *.woff2
+		header @static Cache-Control "public, max-age=604800, immutable"
+		# HTML — no cache (always fresh)
+		@html path *.html /
+		header @html Cache-Control "no-cache"
+		# Compression
+		encode gzip
 		root * /www
 		file_server
 	}

@@ -9,6 +9,11 @@
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#0B1929">
   <link rel="canonical" href="https://secureshare-relay.duckdns.org/">
+  <!-- Hreflang (multilingual single-page) -->
+  <link rel="alternate" hreflang="uk" href="https://secureshare-relay.duckdns.org/">
+  <link rel="alternate" hreflang="en" href="https://secureshare-relay.duckdns.org/">
+  <link rel="alternate" hreflang="de" href="https://secureshare-relay.duckdns.org/">
+  <link rel="alternate" hreflang="x-default" href="https://secureshare-relay.duckdns.org/">
   <!-- Open Graph -->
   <meta property="og:title" content="SecureShare — Безпечна передача файлів">
   <meta property="og:description" content="E2E шифрування. Без реєстрації. Без хмари. До 5 ГБ.">
@@ -60,6 +65,62 @@
       "Connection verification (MITM protection)",
       "Zero-knowledge server",
       "Open source (MIT license)"
+    ]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Are my files really encrypted?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Every file is encrypted on the sender's device using AES-256-GCM with a unique key generated via X25519. The relay server only sees encrypted data and has no way to decrypt it."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is the maximum file size?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Up to 5 GB. Files are transferred in 256 KB chunks with interrupted transfer resumption — even if the connection drops, you don't need to start over."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is registration required?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. Just download the app, choose a file, and share the session code with the recipient. No account, email, or phone needed."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is the verification code?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "After connecting, both participants see the same 8-character code. If the codes match — the connection is secure. This protects against man-in-the-middle (MITM) attacks."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Which operating systems are supported?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Windows 10/11 and Linux (x64). The app requires no installation — just download and run."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Are files stored on the server?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. The relay server only forwards encrypted packets between participants in real time. After the transfer is complete — zero traces. Session codes are hashed and not logged."
+        }
+      }
     ]
   }
   </script>
@@ -189,6 +250,66 @@
     }
     .btn-secondary:hover { background: rgba(255,255,255,.15); }
     .hero-buttons { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+
+    /* ── Sticky Nav ───────────────────────────────── */
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 900;
+      background: rgba(255,255,255,.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(0,0,0,.06);
+      padding: 0;
+      transition: box-shadow .2s;
+    }
+    .site-nav.scrolled {
+      box-shadow: 0 2px 16px rgba(0,0,0,.08);
+    }
+    [data-theme="dark"] .site-nav {
+      background: rgba(15,18,24,.92);
+      border-bottom-color: rgba(255,255,255,.06);
+    }
+    [data-theme="dark"] .site-nav.scrolled {
+      box-shadow: 0 2px 16px rgba(0,0,0,.4);
+    }
+    .nav-inner {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      padding: 0 8px;
+    }
+    .nav-inner::-webkit-scrollbar { display: none; }
+    .nav-inner a {
+      padding: 14px 16px;
+      font-size: .85rem;
+      font-weight: 500;
+      color: var(--gray);
+      white-space: nowrap;
+      text-decoration: none;
+      transition: color .2s;
+      border-bottom: 2px solid transparent;
+    }
+    .nav-inner a:hover {
+      color: var(--blue);
+      text-decoration: none;
+    }
+    .nav-inner a.active {
+      color: var(--blue);
+      border-bottom-color: var(--blue);
+      font-weight: 600;
+    }
+    [data-theme="dark"] .nav-inner a { color: #94A3B8; }
+    [data-theme="dark"] .nav-inner a:hover,
+    [data-theme="dark"] .nav-inner a.active { color: #64B5F6; border-bottom-color: #64B5F6; }
+
+    @media (max-width: 768px) {
+      .nav-inner { gap: 0; }
+      .nav-inner a { padding: 12px 10px; font-size: .78rem; }
+    }
 
     /* ── Features ──────────────────────────────────── */
     .features {
@@ -1056,6 +1177,19 @@
       </div>
     </div>
   </section>
+
+  <!-- Sticky Navigation (SEO + UX) -->
+  <nav class="site-nav" id="siteNav" aria-label="Main navigation">
+    <div class="container nav-inner">
+      <a href="#features" data-i18n="nav_features">Можливості</a>
+      <a href="#how" data-i18n="nav_how">Як працює</a>
+      <a href="#preview" data-i18n="nav_preview">Демо</a>
+      <a href="#security" data-i18n="nav_security">Безпека</a>
+      <a href="#faq" data-i18n="nav_faq">FAQ</a>
+      <a href="#changelog" data-i18n="nav_changelog">Версії</a>
+      <a href="#support" data-i18n="nav_support">Підтримка</a>
+    </div>
+  </nav>
 
   <!-- Features -->
   <section class="features" id="features">
