@@ -299,6 +299,68 @@ class StatsCollector:
         # ── Client telemetry events (processed) ───────────────
         self._client_events: dict[str, int] = defaultdict(int)
 
+        # ── Restore from disk ─────────────────────────────────
+        self._load_from_disk()
+
+    # ── Restore from disk on startup ─────────────────────────
+
+    def _load_from_disk(self) -> None:
+        """Restore all counters from the last JSONL snapshot.
+
+        Reads the most recent record and restores:
+          - lifetime counters (sessions, bytes, etc.)
+          - peak concurrent rooms
+          - distributions (sizes, durations, versions, OS, errors)
+          - client events
+        """
+        try:
+            records = self._writer.read_recent(max_lines=1)
+            if not records:
+                log.info("Stats: no previous data on disk — starting fresh")
+                return
+            last = records[-1]
+
+            # Restore lifetime counters
+            saved_lifetime = last.get("lifetime", {})
+            if isinstance(saved_lifetime, dict):
+                for key in self.lifetime:
+                    if key in saved_lifetime:
+                        val = saved_lifetime[key]
+                        if isinstance(val, (int, float)):
+                            self.lifetime[key] = int(val)
+
+            self.peak_concurrent_rooms = int(
+                last.get("peak_rooms", 0)
+            )
+
+            # Restore distributions
+            dist = last.get("distributions", {})
+            if isinstance(dist, dict):
+                for k, v in dist.get("transfer_size", {}).items():
+                    self._size_dist[k] = int(v)
+                for k, v in dist.get("transfer_duration", {}).items():
+                    self._duration_dist[k] = int(v)
+                for k, v in dist.get("app_versions", {}).items():
+                    self._versions[k] = int(v)
+                for k, v in dist.get("os_types", {}).items():
+                    self._os_dist[k] = int(v)
+                for k, v in dist.get("error_types", {}).items():
+                    self._error_types[k] = int(v)
+
+            # Restore client events
+            events = last.get("client_events", {})
+            if isinstance(events, dict):
+                for k, v in events.items():
+                    self._client_events[k] = int(v)
+
+            log.info(
+                "Stats: restored from disk — %d sessions, %.2f GB relayed",
+                self.lifetime["sessions_completed"],
+                self.lifetime["bytes_relayed"] / (1024 ** 3),
+            )
+        except Exception as exc:
+            log.warning("Stats: failed to restore from disk: %s", exc)
+
     # ── Recording events ──────────────────────────────────────
 
     def record_connection(self) -> None:
@@ -420,13 +482,24 @@ class StatsCollector:
     # ── Persistence ────────────────────────────────────────────
 
     def flush_hourly(self) -> None:
-        """Flush current stats snapshot to JSONL (called every hour)."""
+        """Flush current stats snapshot to JSONL (called every hour).
+
+        Includes all data needed to restore state after restart.
+        """
         record = {
             "ts": _now_iso(),
             "hour": _hour_key(),
             "lifetime": dict(self.lifetime),
             "hourly_current": dict(self._hourly.get(_hour_key(), {})),
             "peak_rooms": self.peak_concurrent_rooms,
+            "distributions": {
+                "transfer_size": dict(self._size_dist),
+                "transfer_duration": dict(self._duration_dist),
+                "app_versions": dict(self._versions),
+                "os_types": dict(self._os_dist),
+                "error_types": dict(self._error_types),
+            },
+            "client_events": dict(self._client_events),
         }
         self._writer.append(record)
         self._purge_old_buckets()
@@ -640,6 +713,57 @@ class LandingAnalytics:
         self._downloads_by_source: dict[str, int] = defaultdict(int)
         self._daily_downloads: dict[str, int] = defaultdict(int)
 
+        # ── Restore from disk ─────────────────────────────────
+        self._load_from_disk()
+
+    def _load_from_disk(self) -> None:
+        """Restore landing counters from the last JSONL snapshot.
+
+        Restores: total views, downloads, daily breakdowns,
+        referrers, languages, screen sizes, download distributions.
+        Note: unique visitors (hashed IP sets) cannot be restored
+        from counts — only the daily count is preserved.
+        """
+        try:
+            records = self._writer.read_recent(max_lines=1)
+            if not records:
+                log.info("Landing: no previous data — starting fresh")
+                return
+            last = records[-1]
+
+            # Restore totals
+            self._total_views = int(last.get("total_views", 0))
+            self._downloads_total = int(last.get("downloads_total", 0))
+
+            # Restore daily breakdowns
+            for day, count in last.get("daily_views", {}).items():
+                self._daily_views[day] = int(count)
+            for day, count in last.get("daily_downloads", {}).items():
+                self._daily_downloads[day] = int(count)
+
+            # Restore distributions
+            for k, v in last.get("referrers", {}).items():
+                self._referrers[k] = int(v)
+            for k, v in last.get("languages", {}).items():
+                self._languages[k] = int(v)
+            for k, v in last.get("screen_sizes", {}).items():
+                self._screen_sizes[k] = int(v)
+
+            # Restore download distributions from flush data
+            # (downloads_by_asset / downloads_by_source are saved
+            #  starting from the next flush after this code deploys)
+            for k, v in last.get("downloads_by_asset", {}).items():
+                self._downloads_by_asset[k] = int(v)
+            for k, v in last.get("downloads_by_source", {}).items():
+                self._downloads_by_source[k] = int(v)
+
+            log.info(
+                "Landing: restored — %d views, %d downloads",
+                self._total_views, self._downloads_total,
+            )
+        except Exception as exc:
+            log.warning("Landing: failed to restore from disk: %s", exc)
+
     def _rotate_salt_if_needed(self) -> None:
         """Rotate the hashing salt daily for privacy."""
         today = _day_key()
@@ -768,7 +892,10 @@ class LandingAnalytics:
         }
 
     def flush(self) -> None:
-        """Flush current landing stats to JSONL."""
+        """Flush current landing stats to JSONL.
+
+        Includes all data needed to fully restore state after restart.
+        """
         record = {
             "ts": _now_iso(),
             "day": _day_key(),
@@ -783,6 +910,8 @@ class LandingAnalytics:
             "referrers": dict(self._referrers),
             "languages": dict(self._languages),
             "screen_sizes": dict(self._screen_sizes),
+            "downloads_by_asset": dict(self._downloads_by_asset),
+            "downloads_by_source": dict(self._downloads_by_source),
         }
         self._writer.append(record)
         self._purge_old_days()
