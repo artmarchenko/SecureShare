@@ -53,6 +53,7 @@ log = logging.getLogger(__name__)
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+
 # ── Startup tips (shown randomly on launch) ───────────────────────
 def _startup_tips() -> list[str]:
     return [
@@ -391,8 +392,6 @@ class App(ctk.CTk):
             pass  # CTkTabview internals changed — tabs will update on restart
 
         # Status indicator — refresh only if idle
-        current_text = self.status_indicator.cget("text")
-        idle_label, _ = self._get_state_labels().get(self.STATE_IDLE, ("", ""))
         # Only refresh if we're in idle state (don't overwrite active status)
         if not hasattr(self, "_current_state") or self._current_state == self.STATE_IDLE:
             self.status_indicator.configure(text=t("state_idle"))
@@ -1621,8 +1620,8 @@ class App(ctk.CTk):
             proceed = messagebox.askyesno(
                 t("msgbox_large_file_title"),
                 t("msgbox_large_file_body",
-                   file_size=_human_size(file_size),
-                   max_size=_human_size(VPS_MAX_FILE_SIZE)),
+                  file_size=_human_size(file_size),
+                  max_size=_human_size(VPS_MAX_FILE_SIZE)),
             )
             if not proceed:
                 return

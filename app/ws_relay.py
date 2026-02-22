@@ -314,13 +314,13 @@ def _do_key_exchange(
     )
     if on_status:
         on_status(t("relay_protocol_info",
-                our_proto=PROTOCOL_VERSION, peer_proto=peer_proto,
-                our_app=APP_VERSION, peer_app=peer_app))
+                    our_proto=PROTOCOL_VERSION, peer_proto=peer_proto,
+                    our_app=APP_VERSION, peer_app=peer_app))
 
     if peer_proto < MIN_PROTOCOL_VERSION:
         if on_status:
             on_status(t("relay_incompatible",
-                peer_proto=peer_proto, min_proto=MIN_PROTOCOL_VERSION))
+                        peer_proto=peer_proto, min_proto=MIN_PROTOCOL_VERSION))
         return None, None
 
     if PROTOCOL_VERSION < peer_proto:
@@ -527,7 +527,7 @@ class VPSRelaySender:
                     RECONNECT_MAX_DELAY,
                 )
                 self._log(t("relay_reconnecting",
-                    delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
+                            delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
                 time.sleep(delay)
                 if self._cancelled:
                     return False
@@ -658,8 +658,8 @@ class VPSRelaySender:
                 resume_bytes = resume_bytes - VPS_CHUNK_SIZE + last_chunk_size
             resume_bytes = min(resume_bytes, file_size)
             self._log(t("relay_resume_info",
-                received=len(skip_chunks), total=total_chunks,
-                mb=f"{resume_bytes / (1024**2):.1f}"))
+                        received=len(skip_chunks), total=total_chunks,
+                        mb=f"{resume_bytes / (1024**2):.1f}"))
 
         # ── 6. Send file chunks ───────────────────────────────────
         from .gui import _human_size
@@ -667,7 +667,7 @@ class VPSRelaySender:
         chunks_to_send = total_chunks - len(skip_chunks)
         if skip_chunks:
             self._log(t("relay_sending_resume",
-                filename=file_name, size=size_str, chunks=chunks_to_send))
+                        filename=file_name, size=size_str, chunks=chunks_to_send))
         else:
             self._log(t("relay_sending", filename=file_name, size=size_str))
 
@@ -746,7 +746,7 @@ class VPSRelaySender:
                     continue
                 retransmit_rounds += 1
                 self._log(t("relay_retransmit",
-                    count=len(missing), round=retransmit_rounds))
+                            count=len(missing), round=retransmit_rounds))
                 with open(self._filepath, "rb") as f:
                     for seq_i in missing:
                         if self._cancelled:
@@ -875,7 +875,7 @@ class VPSRelayReceiver:
                     RECONNECT_MAX_DELAY,
                 )
                 self._log(t("relay_reconnecting",
-                    delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
+                            delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
                 time.sleep(delay)
                 if self._cancelled:
                     return None
@@ -1026,9 +1026,9 @@ class VPSRelayReceiver:
                     except Exception:
                         continue
 
-                    t = msg.get("type")
+                    msg_type = msg.get("type")
 
-                    if t == "relay_meta":
+                    if msg_type == "relay_meta":
                         raw_name     = msg["name"]
                         file_size    = msg["size"]
                         file_hash    = msg["sha256"]
@@ -1059,8 +1059,8 @@ class VPSRelayReceiver:
                             return None
                         if file_size > VPS_MAX_FILE_SIZE:
                             self._log(t("relay_file_too_large",
-                                size=f"{file_size / (1024**3):.1f}",
-                                limit=f"{VPS_MAX_FILE_SIZE / (1024**3):.0f}"))
+                                        size=f"{file_size / (1024**3):.1f}",
+                                        limit=f"{VPS_MAX_FILE_SIZE / (1024**3):.0f}"))
                             return None
 
                         # ── Security: validate chunk_size / total_chunks ──
@@ -1110,8 +1110,8 @@ class VPSRelayReceiver:
 
                             if is_resume:
                                 self._log(t("relay_resume_found",
-                                    received=len(received_seqs), total=total_chunks,
-                                    mb=f"{bytes_received / (1024**2):.1f}"))
+                                            received=len(received_seqs), total=total_chunks,
+                                            mb=f"{bytes_received / (1024**2):.1f}"))
 
                         if not is_resume:
                             received_seqs = set()
@@ -1137,7 +1137,7 @@ class VPSRelayReceiver:
                         if is_resume:
                             pct = bytes_received / file_size * 100 if file_size else 0
                             self._log(t("relay_receiving_resume",
-                                filename=file_name, size=size_str, pct=f"{pct:.0f}"))
+                                        filename=file_name, size=size_str, pct=f"{pct:.0f}"))
                         else:
                             self._log(t("relay_receiving", filename=file_name, size=size_str))
 
@@ -1153,7 +1153,7 @@ class VPSRelayReceiver:
                         if self.on_progress and is_resume:
                             self.on_progress(bytes_received, file_size, 0)
 
-                    elif t == "relay_done":
+                    elif msg_type == "relay_done":
                         total_chunks = msg.get("total_chunks", total_chunks)
                         file_hash    = msg.get("sha256", file_hash)
 
@@ -1204,7 +1204,7 @@ class VPSRelayReceiver:
                                 elapsed = time.monotonic() - t0
                                 avg = file_size / elapsed if elapsed > 0 else 0
                                 self._log(t("relay_saved",
-                                    filename=save_path.name, speed=f"{avg / (1024*1024):.1f}"))
+                                            filename=save_path.name, speed=f"{avg / (1024*1024):.1f}"))
                                 return save_path
                             else:
                                 self._log(t("relay_hash_mismatch_recv"))
@@ -1279,7 +1279,7 @@ class VPSRelayReceiver:
                 and len(received_seqs) < total_chunks
             ):
                 self._log(t("relay_progress_saved",
-                    received=len(received_seqs), total=total_chunks))
+                            received=len(received_seqs), total=total_chunks))
                 _save_manifest(
                     _manifest_path(self._save_dir, file_name),
                     transfer_id, file_name, file_size,

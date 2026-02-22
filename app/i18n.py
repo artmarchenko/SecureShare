@@ -19,7 +19,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def _load_dict(path: Path) -> dict[str, str]:
 
 def _load_all() -> None:
     """Scan lang/ directory and load all available dictionaries."""
-    global _languages, _fallback
+    global _fallback
     lang_path = _lang_dir()
     if not lang_path.is_dir():
         log.warning("Language directory not found: %s", lang_path)
