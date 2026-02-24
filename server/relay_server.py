@@ -182,12 +182,18 @@ class HTTPRouter:
       GET  /api/files?key=...    — list log files (admin)
     """
 
-    def __init__(self, stats: StatsCollector, crashes: CrashStore,
-                 landing: LandingAnalytics):
+    def __init__(
+        self,
+        stats: StatsCollector,
+        crashes: CrashStore,
+        landing: LandingAnalytics,
+        get_active_rooms=None,
+    ):
         self._stats = stats
         self._crashes = crashes
         self._landing = landing
         self._api_limiter = APIRateLimiter()
+        self._get_active_rooms = get_active_rooms
 
     async def handle(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -281,12 +287,18 @@ class HTTPRouter:
 
     async def _handle_health(self, writer) -> None:
         summary = self._stats.get_summary()
+        active_rooms = summary["lifetime"]["sessions_created"] \
+            - summary["lifetime"]["sessions_completed"] \
+            - summary["lifetime"]["sessions_timeout"]
+        if callable(self._get_active_rooms):
+            try:
+                active_rooms = int(self._get_active_rooms())
+            except Exception:
+                pass
         body = {
             "status": "ok",
             "uptime_hours": summary["uptime_hours"],
-            "active_rooms": summary["lifetime"]["sessions_created"]
-            - summary["lifetime"]["sessions_completed"]
-            - summary["lifetime"]["sessions_timeout"],
+            "active_rooms": max(0, active_rooms),
             "total_connections": summary["lifetime"]["connections_total"],
         }
         await _send_response(writer, 200, body)
@@ -609,8 +621,12 @@ class RelayServer:
         self._analytics = StatsCollector(DATA_DIR)
         self._crashes = CrashStore(DATA_DIR)
         self._landing = LandingAnalytics(DATA_DIR)
-        self._http_router = HTTPRouter(self._analytics, self._crashes,
-                                       self._landing)
+        self._http_router = HTTPRouter(
+            self._analytics,
+            self._crashes,
+            self._landing,
+            get_active_rooms=lambda: len(self._rooms),
+        )
         self._background_tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
