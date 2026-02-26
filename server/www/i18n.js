@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
   var T = {
     en: {
       hero_subtitle: "Transfer files directly between devices with end-to-end encryption. No registration, no cloud, no traces.",
@@ -91,8 +91,108 @@
       footer_changelog: "What\u2019s new",
       footer_bug: "Report a bug",
       footer_support: "Support"
+    },
+    de: {
+      hero_subtitle: "Dateien direkt zwischen Ger\u00e4ten mit Ende-zu-Ende-Verschl\u00fcsselung \u00fcbertragen. Ohne Registrierung, ohne Cloud, ohne Spuren.",
+      badge_no_reg: "Ohne Registrierung",
+      badge_5gb: "Bis zu 5 GB",
+      features_title: "Warum SecureShare?",
+      features_sub: "Entwickelt f\u00fcr alle, die Privatsph\u00e4re und Einfachheit sch\u00e4tzen",
+      feat_e2e_title: "Ende-zu-Ende-Verschl\u00fcsselung",
+      feat_e2e_desc: "X25519-Schl\u00fcsselaustausch + AES-256-GCM. Der Server sieht nur Chiffretext \u2014 niemals Ihre Daten.",
+      feat_noreg_title: "Ohne Registrierung",
+      feat_noreg_desc: "Kein Konto, keine E-Mail, kein Telefon n\u00f6tig. Einfach die App \u00f6ffnen und den Sitzungscode teilen.",
+      feat_5gb_title: "Bis zu 5 GB",
+      feat_5gb_desc: "Gro\u00dfe Dateien ohne Cloud-Beschr\u00e4nkungen \u00fcbertragen. Wiederaufnahme unterbrochener \u00dcbertragungen inklusive.",
+      feat_reconnect_title: "Auto-Reconnect",
+      feat_reconnect_desc: "Verbindung verloren? Die App verbindet sich automatisch wieder und setzt dort fort, wo sie aufgeh\u00f6rt hat.",
+      feat_verify_title: "Verifizierung",
+      feat_verify_desc: "Der Verifizierungscode stellt sicher, dass Sie mit der richtigen Person kommunizieren. Schutz vor MITM-Angriffen.",
+      feat_nocloud_title: "Kein Cloud-Speicher",
+      feat_nocloud_desc: "Dateien werden direkt \u00fcbertragen. Nichts wird auf dem Server gespeichert \u2014 null Spuren nach der \u00dcbertragung.",
+      how_title: "Wie funktioniert es?",
+      how_sub: "Drei einfache Schritte \u2014 und Ihre Datei ist sicher",
+      step1_title: "Absender erstellt eine Sitzung",
+      step1_desc: "Klicken Sie auf \u201eSenden\u201c, w\u00e4hlen Sie eine Datei. Die App generiert einen einzigartigen 8-stelligen Sitzungscode.",
+      step2_title: "Empf\u00e4nger verbindet sich",
+      step2_desc: "Geben Sie den Code in Ihrer App ein. Beide Ger\u00e4te tauschen Schl\u00fcssel aus und verifizieren die Verbindung.",
+      step3_title: "Datei wird \u00fcbertragen",
+      step3_desc: "Die Daten werden auf dem Ger\u00e4t des Absenders verschl\u00fcsselt und nur beim Empf\u00e4nger entschl\u00fcsselt. Der Server sieht nur Rauschen.",
+      sec_title: "Sicherheit an erster Stelle",
+      sec_sub: "Jeder Aspekt wurde mit Blick auf Privatsph\u00e4re entwickelt",
+      sec_x25519: "Elliptische-Kurven-Diffie-Hellman zur Erzeugung eines gemeinsamen Schl\u00fcssels ohne \u00dcbertragung von Geheimnissen \u00fcber das Netzwerk.",
+      sec_aes_title: "AES-256-GCM mit AAD",
+      sec_aes: "Authentifizierte Verschl\u00fcsselung. Der Sitzungscode ist als Associated Data gebunden \u2014 verhindert Chiffretext-Substitution.",
+      sec_sha_title: "SHA-256 Integrit\u00e4tspr\u00fcfung",
+      sec_sha: "Jede \u00fcbertragene Datei wird per Hash verifiziert. Selbst ein einziges ge\u00e4ndertes Byte wird erkannt.",
+      sec_tls_title: "TLS 1.3 Transport",
+      sec_tls: "WebSocket \u00fcber WSS mit automatischem Let\u2019s-Encrypt-Zertifikat. Doppelte Verschl\u00fcsselungsschicht.",
+      sec_zk_title: "Zero-Knowledge-Server",
+      sec_zk: "Der Relay-Server sieht niemals Dateiinhalte. Sitzungscodes werden gehasht \u2014 keinerlei Inhalts-Logs.",
+      sec_oss_title: "Open Source",
+      sec_oss: "Der gesamte Code ist auf GitHub verf\u00fcgbar. Pr\u00fcfen, auditieren und Verbesserungen vorschlagen.",
+      cta_title: "Bereit, Dateien sicher zu \u00fcbertragen?",
+      cta_sub: "Laden Sie SecureShare kostenlos herunter. Ohne Registrierung, ohne Einschr\u00e4nkungen.",
+      changelog_title: "Entwicklungsgeschichte",
+      changelog_sub: "Das Projekt entwickelt sich aktiv weiter \u2014 jede Version macht den Dateitransfer sicherer und komfortabler",
+      date_feb_2026: "Februar 2026",
+      date_jan_2026: "Januar 2026",
+      tag_security: "Sicherheit",
+      tag_major: "Gro\u00dfes Release",
+      tag_features: "Features",
+      tag_first_release: "Erstes Release",
+      cl_331_1: "Umfassendes Sicherheitsaudit: 87 Tests, 6 behobene Schwachstellen",
+      cl_331_2: "Schutz vor IP-Spoofing, CRLF-Injection, Memory-DoS",
+      cl_331_3: "CVE-2026-26007 \u2014 Aktualisierung kryptografischer Bibliotheken",
+      cl_331_4: "pip-audit in CI \u2014 automatische CVE-\u00dcberwachung",
+      cl_331_5: "Zuverl\u00e4ssiges Auto-Update: Rename+Copy statt Bat-Skript",
+      cl_331_6: "Schutz vor Updates aus Archiv-/Temp-Ordnern",
+      cl_331_7: "UI-Redesign: Symbolleiste mit beschrifteten Buttons, neue Hilfe-Abschnitte",
+      cl_331_8: "CI-Build-Kompatibilit\u00e4t: Python 3.12.10 + PyInstaller 6.19.0 gepinnt",
+      cl_330_1: "Auto-Update mit SHA-256-Verifizierung und Integrit\u00e4tspr\u00fcfung",
+      cl_330_2: "Anonyme Telemetrie und Crash-Reporting",
+      cl_330_3: "Admin-Dashboard mit Diagrammen und Statistiken",
+      cl_330_4: "Spendenunterst\u00fctzung \u00fcber Ko-fi",
+      cl_330_5: "CI/CD in 4 unabh\u00e4ngige Workflows aufgeteilt",
+      cl_330_6: "MIT-Lizenz \u2014 vollst\u00e4ndig Open Source",
+      cl_32_1: "Linux-Build \u2014 plattform\u00fcbergreifende Unterst\u00fctzung",
+      cl_32_2: "Auto-Reconnect bei Verbindungsverlust",
+      cl_32_3: "Wiederaufnahme unterbrochener \u00dcbertragungen (Resume)",
+      cl_32_4: "Landingpage f\u00fcr den Relay-Server",
+      cl_32_5: "DNS-Retry \u2014 stabilere Verbindungen",
+      cl_30_1: "E2E-Verschl\u00fcsselung: X25519 + AES-256-GCM + SHA-256",
+      cl_30_2: "VPS-Relay-Server mit Docker + Caddy + TLS 1.3",
+      cl_30_3: "Benutzerfreundliche GUI mit Fortschrittsanzeige und Verifizierung",
+      cl_30_4: "CI/CD: automatischer Build, Tests, Deployment",
+      cl_30_5: "Pentest und grundlegende Sicherheitsh\u00e4rtung",
+      cl_30_6: "Dokumentation f\u00fcr Benutzer und Entwickler",
+      all_releases: "Alle Releases auf GitHub",
+      support_title: "Unterst\u00fctzen Sie das Projekt",
+      support_text1: "SecureShare ist ein <strong>kostenloses Open-Source-Projekt</strong>, das von einer Person in der Freizeit entwickelt wird. Server, Domain und Entwicklung kosten Geld, und Motivation braucht Ihre Unterst\u00fctzung.",
+      support_text2: "Jede Tasse Kaffee hilft, den Relay-Server online zu halten, die Sicherheit zu verbessern und neue Features hinzuzuf\u00fcgen. Selbst eine kleine Spende ist ein Zeichen, dass dieses Projekt Menschen wichtig ist.",
+      support_server: "Server",
+      support_server_desc: "Relay l\u00e4uft 24/7 f\u00fcr Sie",
+      support_security: "Sicherheit",
+      support_security_desc: "Audits, Updates, Patches",
+      support_dev: "Entwicklung",
+      support_dev_desc: "Neue Plattformen und Features",
+      support_btn: "Einen Kaffee spendieren",
+      support_note: "Sie k\u00f6nnen uns auch einen Stern auf <a href=\"https://github.com/artmarchenko/SecureShare\" target=\"_blank\" rel=\"noopener\">GitHub</a> geben \u2014 das ist kostenlos und sehr motivierend!",
+      footer_docs: "Dokumentation",
+      footer_devs: "F\u00fcr Entwickler",
+      footer_changelog: "Was gibt\u2019s Neues",
+      footer_bug: "Fehler melden",
+      footer_support: "Unterst\u00fctzen"
     }
   };
+
+  var TITLES = {
+    uk: "SecureShare \u2014 \u0411\u0435\u0437\u043f\u0435\u0447\u043d\u0430 \u043f\u0435\u0440\u0435\u0434\u0430\u0447\u0430 \u0444\u0430\u0439\u043b\u0456\u0432",
+    en: "SecureShare \u2014 Secure File Transfer",
+    de: "SecureShare \u2014 Sichere Datei\u00fcbertragung"
+  };
+
+  var LANG_CODES = { uk: "uk", en: "en", de: "de" };
 
   var ukTexts = {};
 
@@ -113,10 +213,8 @@
         els[i].innerHTML = T[lang][key];
       }
     }
-    document.documentElement.lang = (lang === 'uk') ? 'uk' : 'en';
-    document.title = (lang === 'uk')
-      ? 'SecureShare \u2014 \u0411\u0435\u0437\u043f\u0435\u0447\u043d\u0430 \u043f\u0435\u0440\u0435\u0434\u0430\u0447\u0430 \u0444\u0430\u0439\u043b\u0456\u0432'
-      : 'SecureShare \u2014 Secure File Transfer';
+    document.documentElement.lang = LANG_CODES[lang] || lang;
+    document.title = TITLES[lang] || TITLES['uk'];
 
     var btns = document.querySelectorAll('.lang-btn');
     for (var j = 0; j < btns.length; j++) {
@@ -135,9 +233,11 @@
 
   document.getElementById('btnUk').addEventListener('click', function() { setLang('uk'); });
   document.getElementById('btnEn').addEventListener('click', function() { setLang('en'); });
+  document.getElementById('btnDe').addEventListener('click', function() { setLang('de'); });
 
   cacheUk();
   var saved = 'uk';
   try { saved = localStorage.getItem('ss_lang') || 'uk'; } catch(e) {}
   if (saved !== 'uk') applyLang(saved);
 })();
+
