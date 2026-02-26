@@ -323,6 +323,8 @@ jobs:
             dist/SecureShare-${{ github.ref_name }}.zip
             dist/SecureShare-${{ github.ref_name }}.exe
             dist/SecureShare-${{ github.ref_name }}-linux-x64.tar.gz
+            dist/SecureShare.zip
+            dist/SecureShare-linux-x64.tar.gz
             dist/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

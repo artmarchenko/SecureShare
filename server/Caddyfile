@@ -41,22 +41,19 @@ secureshare-relay.duckdns.org {
 		file_server
 	}
 
-	# App download — static files from /downloads
+	# App download — stable aliases redirected to latest GitHub release assets
+	handle /download/SecureShare.zip {
+		header Content-Security-Policy "default-src 'none'"
+		redir https://github.com/artmarchenko/SecureShare/releases/latest/download/SecureShare.zip 302
+	}
+	handle /download/SecureShare-linux-x64.tar.gz {
+		header Content-Security-Policy "default-src 'none'"
+		redir https://github.com/artmarchenko/SecureShare/releases/latest/download/SecureShare-linux-x64.tar.gz 302
+	}
+	# Fallback for any unknown download path.
 	handle /download/* {
 		header Content-Security-Policy "default-src 'none'"
-		header Content-Disposition "attachment"
-		header Cache-Control "no-cache"
-		header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-		header X-Content-Type-Options "nosniff"
-		header X-Frame-Options "DENY"
-		header Referrer-Policy "no-referrer"
-		header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
-		header Cross-Origin-Opener-Policy "same-origin"
-		header Cross-Origin-Resource-Policy "same-origin"
-		header -Server
-		uri strip_prefix /download
-		root * /downloads
-		file_server
+		redir https://github.com/artmarchenko/SecureShare/releases/latest 302
 	}
 
 	# WebSocket relay — proxy only WS connections
