@@ -1,0 +1,12 @@
+#!/bin/sh
+# SecureShare pre-push guard.
+# Blocks push when cross-module regression checks fail.
+
+python scripts/regression_guard.py
+rc=$?
+if [ $rc -ne 0 ]; then
+  echo "pre-push blocked: regression guard failed"
+  exit $rc
+fi
+
+exit 0

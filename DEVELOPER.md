@@ -942,6 +942,26 @@ Manual or automated:
 4. Both confirm verification code
 5. File transfers and SHA-256 matches
 
+### 11.3. Cross-Module Regression Guard (Required Before Push)
+
+Run this guard before any push to avoid breaking previously tested behavior
+in another part of the project:
+
+```bash
+python scripts/regression_guard.py
+```
+
+What it checks:
+- Version sync across `app/config.py`, `version_info.txt`, `server/relay_server.py`
+- Server invariants (`/health` active_rooms guard + analytics restore on startup)
+- Landing i18n invariants (language buttons + `en/de` key coverage for all `data-i18n`)
+
+Optional: enforce automatically via Git hook:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ---
 
 ## 12. Secrets Management
