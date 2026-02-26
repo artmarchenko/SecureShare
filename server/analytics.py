@@ -307,18 +307,26 @@ class StatsCollector:
     def _load_from_disk(self) -> None:
         """Restore all counters from the last JSONL snapshot.
 
-        Reads the most recent record and restores:
+        Reads recent records and restores from the newest valid snapshot:
           - lifetime counters (sessions, bytes, etc.)
           - peak concurrent rooms
           - distributions (sizes, durations, versions, OS, errors)
           - client events
         """
         try:
-            records = self._writer.read_recent(max_lines=1)
+            # Read a small tail window so one malformed tail line does not reset stats.
+            records = self._writer.read_recent(max_lines=2000)
             if not records:
                 log.info("Stats: no previous data on disk — starting fresh")
                 return
-            last = records[-1]
+            last = None
+            for record in reversed(records):
+                if isinstance(record.get("lifetime"), dict):
+                    last = record
+                    break
+            if not isinstance(last, dict):
+                log.warning("Stats: no valid snapshot found in recent history — starting fresh")
+                return
 
             # Restore lifetime counters
             saved_lifetime = last.get("lifetime", {})
