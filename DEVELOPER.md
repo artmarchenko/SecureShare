@@ -901,6 +901,45 @@ flake8 app/ main.py build.py
 flake8 server/relay_server.py
 ```
 
+### 10.6. Worktree Convention (Required)
+
+To avoid branch/worktree chaos, follow this operational protocol:
+
+1. **One task = one branch = one worktree**
+   - Branch naming: `feature/*`, `hotfix/*`, `chore/*`
+   - Never use detached `HEAD` for work that will be committed.
+2. **Keep one canonical `main` worktree**
+   - Use a single stable folder for `main`.
+   - Keep it synced with `origin/main`.
+3. **Before any commit/push, always verify context**
+   - `git rev-parse --abbrev-ref HEAD`
+   - `git status -sb`
+   - If branch name is `HEAD`, stop and switch to a real branch.
+4. **After merge, clean up immediately**
+   - Delete remote branch
+   - Delete local branch
+   - Remove corresponding worktree
+5. **Weekly repository hygiene**
+   - `git fetch --all --prune`
+   - `git worktree list`
+   - `git branch -vv`
+   - Remove stale or gone branches/worktrees.
+
+Recommended command flow:
+
+```bash
+# Start task
+git fetch origin
+git switch -c hotfix/example origin/main
+git worktree add ../wt-hotfix-example hotfix/example
+
+# Finish task (after merge)
+git push origin --delete hotfix/example
+git branch -D hotfix/example
+git worktree remove ../wt-hotfix-example
+git worktree prune
+```
+
 ---
 
 ## 11. Testing
