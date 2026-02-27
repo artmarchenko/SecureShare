@@ -653,6 +653,7 @@ On `SIGTERM` or `SIGINT`:
 | CPU | 1 OCPU (AMD) |
 | RAM | 1 GB |
 | Storage | 50 GB boot volume |
+| Outbound transfer quota | Up to 10 TB/month egress (Oracle Always Free) |
 | OS | Ubuntu 22.04 |
 | Region | eu-amsterdam-1 |
 
@@ -1071,7 +1072,7 @@ Secrets configured in repository settings:
 | **MITM (key substitution)** | Signaling encryption + verification code | User must actually compare codes |
 | **Replay attack** | Counter-based nonces + session AAD | None if protocol followed |
 | **Session hijacking** | Session code brute force: 36^8 ≈ 2.8 × 10^12 combinations | Impractical within session lifetime |
-| **DDoS on relay** | Rate limiting + fail2ban + iptables SYN protection | Oracle Free tier has limited bandwidth |
+| **DDoS on relay** | Rate limiting + fail2ban + iptables SYN protection | Oracle Always Free egress quota is finite (up to 10 TB/month); monitor usage |
 | **Server compromise** | E2E encryption — server never has keys | Attacker could disrupt but not decrypt |
 | **.exe decompilation** | Python bytecode visible; no secrets in binary | Relay URL, protocol visible; no secret keys |
 | **DNS spoofing** | TLS certificate pinning via Let's Encrypt | User trusts CA infrastructure |
