@@ -44,7 +44,11 @@ from .updater import (
     can_auto_update, download_and_verify, get_update_blocked_reason,
     install_and_restart,
 )
-from .telemetry import report_crash, report_session
+from .telemetry import (
+    is_crash_reporting_enabled, is_telemetry_enabled,
+    report_crash, report_session,
+    set_crash_reporting_enabled, set_telemetry_enabled,
+)
 from .i18n import t, init as i18n_init, set_language, get_language, available_languages
 
 log = logging.getLogger(__name__)
@@ -52,6 +56,9 @@ log = logging.getLogger(__name__)
 # ── Appearance ─────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+
+# Seconds the user has to confirm the verification code
+VERIFY_TIMEOUT = 120
 
 
 # ── Startup tips (shown randomly on launch) ───────────────────────
@@ -277,7 +284,9 @@ class App(ctk.CTk):
 
         # ── Status / progress area (shared) ───────────────────────
         status_frame = ctk.CTkFrame(self)
-        status_frame.pack(fill="x", padx=20, pady=(4, 6))
+        # Bottom-anchored and packed before the tabs, so when the window is
+        # short the tab area shrinks instead of the status area/footer (U1).
+        status_frame.pack(side="bottom", fill="x", padx=20, pady=(4, 6), before=self.tabs)
 
         # Connection status indicator
         self.status_indicator = ctk.CTkLabel(
@@ -362,7 +371,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=10),
             text_color="gray",
         )
-        self._copyright_lbl.pack(pady=(0, 4))
+        self._copyright_lbl.pack(side="bottom", pady=(0, 4), before=status_frame)
 
     def _on_language_change(self, label: str):
         """Handle language selection from the toolbar dropdown."""
@@ -703,7 +712,7 @@ class App(ctk.CTk):
 
         win = ctk.CTkToplevel(self)
         win.title(f"{APP_NAME} — {t('diag_title')}")
-        win.geometry("480x420")
+        win.geometry("480x540")
         win.resizable(False, False)
         win.transient(self)
         win.grab_set()
@@ -766,6 +775,27 @@ class App(ctk.CTk):
         )
         summary_label.pack(pady=(4, 2))
 
+        # Privacy toggles (crash reports are on by default, usage stats off)
+        privacy = ctk.CTkFrame(win, fg_color="#2a2a2a", corner_radius=8)
+        privacy.pack(fill="x", padx=20, pady=(4, 6))
+        ctk.CTkLabel(
+            privacy, text=t("diag_privacy_title"),
+            font=ctk.CTkFont(size=13, weight="bold"), anchor="w",
+        ).pack(fill="x", padx=12, pady=(8, 2))
+
+        crash_var = ctk.BooleanVar(value=is_crash_reporting_enabled())
+        stats_var = ctk.BooleanVar(value=is_telemetry_enabled())
+        self._diag_crash_switch = ctk.CTkSwitch(
+            privacy, text=t("diag_crash_reports"), variable=crash_var,
+            command=lambda: set_crash_reporting_enabled(bool(crash_var.get())),
+        )
+        self._diag_crash_switch.pack(anchor="w", padx=12, pady=2)
+        self._diag_stats_switch = ctk.CTkSwitch(
+            privacy, text=t("diag_usage_stats"), variable=stats_var,
+            command=lambda: set_telemetry_enabled(bool(stats_var.get())),
+        )
+        self._diag_stats_switch.pack(anchor="w", padx=12, pady=(2, 10))
+
         # Close button
         close_btn = ctk.CTkButton(
             win, text=t("btn_close"), width=140, height=32,
@@ -802,7 +832,8 @@ class App(ctk.CTk):
             # 1. Internet connectivity
             try:
                 socket.setdefaulttimeout(5)
-                socket.create_connection(("8.8.8.8", 53), timeout=5).close()
+                # TCP 443 is rarely blocked, unlike outbound port 53 on corporate networks
+                socket.create_connection(("1.1.1.1", 443), timeout=5).close()
                 _update_row("internet", True, t("diag_connected"))
                 passed += 1
             except Exception:
@@ -858,13 +889,10 @@ class App(ctk.CTk):
 
             # 4. WebSocket connection
             try:
-                import websockets.sync.client as wsc
+                # websocket-client is what transfers use (and what the .exe bundles)
+                import websocket
                 t0 = time.perf_counter()
-                ws = wsc.connect(
-                    f"{VPS_RELAY_URL}/health",
-                    open_timeout=5,
-                    close_timeout=3,
-                )
+                ws = websocket.create_connection(VPS_RELAY_URL, timeout=5)
                 ws_ms = (time.perf_counter() - t0) * 1000
                 ws.close()
                 _update_row("websocket", True, f"OK ({ws_ms:.0f} ms)")
@@ -1492,9 +1520,11 @@ class App(ctk.CTk):
         """
         result: list[Optional[bool]] = [None]
         event = threading.Event()
+        dialog_ref: list = [None]
 
         def _show():
             dialog = ctk.CTkToplevel(self)
+            dialog_ref[0] = dialog
             dialog.title(t("verify_title"))
             dialog.geometry("440x320")
             dialog.resizable(False, False)
@@ -1574,8 +1604,18 @@ class App(ctk.CTk):
             dialog.protocol("WM_DELETE_WINDOW", _cancel)
 
         self.after(0, _show)
-        event.wait(timeout=120)
-        return result[0] if result[0] is not None else False
+        event.wait(timeout=VERIFY_TIMEOUT)
+        if result[0] is None:
+            # B5: nobody answered — close the stale dialog and tell the user
+            def _close_stale():
+                dialog = dialog_ref[0]
+                if dialog is not None and dialog.winfo_exists():
+                    dialog.grab_release()
+                    dialog.destroy()
+            self.after(0, _close_stale)
+            self._log(t("verify_timeout"))
+            return False
+        return result[0]
 
     # ════════════════════════════════════════════════════════════════
     #  Status callback adapter for ws_relay → GUI state indicator

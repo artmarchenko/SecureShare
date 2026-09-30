@@ -54,6 +54,23 @@ def test_diagnostics_window_is_single_instance(app):
     assert len(wins) == 1
 
 
+def test_privacy_toggles_reflect_and_change_settings(app):
+    # B2: crash reports (default on) and usage statistics (default off) can be toggled
+    from app import telemetry
+    telemetry.set_crash_reporting_enabled(True)
+    telemetry.set_telemetry_enabled(False)
+    app._run_diagnostics()
+    pump(app, timeout=0.2)
+    assert app._diag_crash_switch.get() == 1
+    assert app._diag_stats_switch.get() == 0
+    app._diag_crash_switch.toggle()
+    app._diag_stats_switch.toggle()
+    assert telemetry.is_crash_reporting_enabled() is False
+    assert telemetry.is_telemetry_enabled() is True
+    telemetry.set_crash_reporting_enabled(True)
+    telemetry.set_telemetry_enabled(False)
+
+
 # ── Update dialog ───────────────────────────────────────────────────
 
 RELEASE = ReleaseInfo(

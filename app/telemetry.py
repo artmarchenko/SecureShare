@@ -42,23 +42,27 @@ TELEMETRY_ENDPOINT = f"{_BASE_URL}/api/telemetry"
 # Timeout for HTTP requests
 HTTP_TIMEOUT = 10  # seconds
 
-# Settings file (same directory as updater settings)
-_SETTINGS_DIR = os.path.join(
-    os.environ.get("APPDATA") or os.path.expanduser("~"),
-    ".secureshare"
-)
+# Settings file (same directory as updater/language settings and the log)
+_APPDATA = os.environ.get("APPDATA") or os.path.expanduser("~")
+_SETTINGS_DIR = os.path.join(_APPDATA, "SecureShare")
 _SETTINGS_FILE = os.path.join(_SETTINGS_DIR, "telemetry.json")
+# Versions <= 3.4 stored this file in a separate hidden folder.
+_LEGACY_SETTINGS_FILE = os.path.join(_APPDATA, ".secureshare", "telemetry.json")
 
 
 # ── Opt-in settings ──────────────────────────────────────────────
 
 def _load_settings() -> dict:
-    try:
-        if os.path.isfile(_SETTINGS_FILE):
-            with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
+    for path in (_SETTINGS_FILE, _LEGACY_SETTINGS_FILE):
+        try:
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if path == _LEGACY_SETTINGS_FILE:
+                    _save_settings(data)  # migrate to the new location
+                return data
+        except Exception:
+            continue
     return {}
 
 

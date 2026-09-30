@@ -7,11 +7,13 @@ from app import telemetry
 
 @pytest.fixture(autouse=True)
 def clean_settings():
-    if os.path.exists(telemetry._SETTINGS_FILE):
-        os.remove(telemetry._SETTINGS_FILE)
+    def _clean():
+        for path in (telemetry._SETTINGS_FILE, telemetry._LEGACY_SETTINGS_FILE):
+            if os.path.exists(path):
+                os.remove(path)
+    _clean()
     yield
-    if os.path.exists(telemetry._SETTINGS_FILE):
-        os.remove(telemetry._SETTINGS_FILE)
+    _clean()
 
 
 def _boom() -> Exception:
@@ -91,3 +93,20 @@ def test_excepthook_reports_and_chains(telemetry_sink, monkeypatch):
     telemetry._crash_excepthook(type(exc), exc, exc.__traceback__)
     assert chained == [ValueError]
     assert telemetry_sink and telemetry_sink[0][1]["state"] == "unhandled"
+
+
+# ── Settings location (B7) ──────────────────────────────────────────
+
+def test_settings_live_next_to_other_app_settings():
+    from app import updater
+    assert os.path.dirname(telemetry._SETTINGS_FILE) == str(updater._SETTINGS_DIR)
+
+
+def test_legacy_settings_are_migrated():
+    import json
+    os.makedirs(os.path.dirname(telemetry._LEGACY_SETTINGS_FILE), exist_ok=True)
+    with open(telemetry._LEGACY_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump({"crash_reporting": False, "enabled": True}, f)
+    assert telemetry.is_crash_reporting_enabled() is False
+    assert telemetry.is_telemetry_enabled() is True
+    assert os.path.isfile(telemetry._SETTINGS_FILE)
