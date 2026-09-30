@@ -115,6 +115,9 @@
   "diag_tls_error": "Помилка: {error}",
   "diag_ws_fail": "Не вдалося підключитися",
   "diag_latency_fail": "Не вдалося виміряти",
+  "diag_privacy_title": "Приватність",
+  "diag_crash_reports": "Надсилати анонімні звіти про збої",
+  "diag_usage_stats": "Надсилати анонімну статистику передач",
   "diag_quality_excellent": "Відмінно",
   "diag_quality_good": "Добре",
   "diag_quality_slow": "Повільно",
@@ -159,6 +162,7 @@
   "verify_title": "🔐 Верифікація з'єднання",
   "verify_prompt": "Переконайтесь, що обидва учасники\nбачать однаковий код:",
   "verify_warning": "⚠ Якщо коди різні — з'єднання може бути\nперехоплено зловмисником (MITM)!",
+  "verify_timeout": "❌ Час на підтвердження коду вичерпано — з'єднання скасовано",
 
   "copyright": "© 2026 Artem Marchenko. All rights reserved.",
 
@@ -221,6 +225,7 @@
   "relay_request_retransmit": "🔄 Запитую ретрансміт {count} чанків...",
   "relay_verifying_sha": "🔍 Перевірка SHA-256...",
   "relay_saved": "✅ Збережено: {filename} ({speed} МБ/с)",
+  "relay_file_renamed": "📝 Файл з такою назвою вже існує — зберігаю як {filename}",
   "relay_hash_mismatch_recv": "❌ Хеш не збігається!",
   "relay_progress_saved": "💾 Збережено прогрес: {received}/{total} чанків — можна відновити",
 

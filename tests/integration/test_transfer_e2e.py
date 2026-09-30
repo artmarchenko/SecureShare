@@ -53,10 +53,11 @@ def test_empty_file_is_rejected_by_receiver(transfer, tmp_path):
     run.threads[1].join(30)
     assert not run.threads[1].is_alive()
     assert run.received is None
-    run.sender.cancel()  # sender thread is a daemon; see B10 for why we don't join it
+    run.sender.cancel()
+    run.join(timeout=10)
+    assert run.sent is False
 
 
-@pytest.mark.xfail(strict=True, reason="B10: cancel() does not interrupt the sender's 120 s wait for relay_meta_ack")
 def test_cancel_is_prompt_while_waiting_for_meta_ack(transfer, tmp_path):
     src = tmp_path / "empty.txt"
     src.write_bytes(b"")          # receiver refuses it, so the sender waits for an ACK forever
@@ -115,26 +116,19 @@ def test_cancel_mid_transfer_keeps_resume_state(transfer, tmp_path, slow_sender)
     assert (inbox / "big.bin.part.resume").exists()
 
 
-def test_existing_file_is_overwritten(transfer, tmp_path):
-    # Characterisation of B6: an existing file with the same name is replaced silently.
+def test_existing_file_is_kept_and_new_one_renamed(transfer, tmp_path):
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "doc.txt").write_bytes(b"precious original")
+    (inbox / "doc (1).txt").write_bytes(b"older copy")
     src = tmp_path / "doc.txt"
     src.write_bytes(b"new content")
     run = transfer(src, save_dir=inbox).start().join()
-    assert run.received.read_bytes() == b"new content"
-
-
-@pytest.mark.xfail(strict=True, reason="B6: existing files should be kept, new one saved as 'name (1).ext'")
-def test_existing_file_is_preserved(transfer, tmp_path):
-    inbox = tmp_path / "inbox"
-    inbox.mkdir()
-    (inbox / "doc.txt").write_bytes(b"precious original")
-    src = tmp_path / "doc.txt"
-    src.write_bytes(b"new content")
-    transfer(src, save_dir=inbox).start().join()
     assert (inbox / "doc.txt").read_bytes() == b"precious original"
+    assert (inbox / "doc (1).txt").read_bytes() == b"older copy"
+    assert run.received == inbox / "doc (2).txt"
+    assert run.received.read_bytes() == b"new content"
+    assert "relay_file_renamed" in run.receiver_log
 
 
 def test_rooms_are_cleaned_up(transfer, tmp_path, relay):

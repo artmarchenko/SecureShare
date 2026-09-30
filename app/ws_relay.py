@@ -239,6 +239,46 @@ def _delete_manifest(save_dir: Path, file_name: str) -> None:
     mpath.unlink(missing_ok=True)
 
 
+# ── File name safety ──────────────────────────────────────────────
+
+_WIN_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def _safe_file_name(raw: object) -> Optional[str]:
+    """Turn the file name announced by the peer into a safe local name.
+
+    Keeps only the last path component (treating both '/' and '\\' as
+    separators on every OS), replaces characters that are special on
+    Windows (':' would create an NTFS alternate data stream), and avoids
+    reserved device names. Returns None if nothing usable is left.
+    """
+    if not isinstance(raw, str) or "\x00" in raw:
+        return None
+    name = raw.replace("\\", "/").split("/")[-1]
+    name = "".join("_" if ord(ch) < 32 or ch in ':*?"<>|' else ch for ch in name)
+    name = name.strip().rstrip(". ")          # Windows drops trailing dots/spaces
+    if not name or name in (".", ".."):
+        return None
+    if name.split(".")[0].upper() in _WIN_RESERVED_NAMES:
+        name = "_" + name
+    return name[:255]
+
+
+def _unique_path(path: Path) -> Path:
+    """Return `path`, or 'name (1).ext', 'name (2).ext', ... if it exists."""
+    if not path.exists():
+        return path
+    for n in range(1, 10_000):
+        candidate = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"too many files named like {path.name}")
+
+
 # ── Key Exchange (common for sender and receiver) ─────────────────
 
 def _do_key_exchange(
@@ -637,10 +677,12 @@ class VPSRelaySender:
 
         # Wait for meta ACK (may include resume info)
         self._log(t("relay_waiting_meta_ack"))
-        try:
-            ack = self._ctl_queue.get(timeout=120)
-        except queue.Empty:
-            self._log(t("relay_meta_timeout"))
+        ack = self._wait_ctl(120)
+        if ack is None:
+            if self._cancelled:
+                return False
+            if not self._connection_lost.is_set():
+                self._log(t("relay_meta_timeout"))
             return None  # retryable
         if ack.get("type") != "relay_meta_ack":
             self._log(t("relay_meta_unexpected"))
@@ -724,9 +766,10 @@ class VPSRelaySender:
             if self._connection_lost.is_set():
                 return None  # connection lost → retry
 
-            try:
-                msg = self._ctl_queue.get(timeout=10)
-            except queue.Empty:
+            msg = self._wait_ctl(10)
+            if msg is None:
+                if self._cancelled:
+                    return False
                 if self._connection_lost.is_set():
                     return None
                 self._send_ctl(done_payload)
@@ -763,6 +806,24 @@ class VPSRelaySender:
         return None  # retryable (might be connection issue)
 
     # ── Send helpers ───────────────────────────────────────────────
+
+    def _wait_ctl(self, timeout: float) -> Optional[dict]:
+        """Wait for the next control message.
+
+        Returns None on timeout, cancel, or lost connection (callers check
+        which). Polls in short slices so cancel() takes effect promptly.
+        """
+        deadline = time.monotonic() + timeout
+        while not self._cancelled:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                return self._ctl_queue.get(timeout=min(0.25, remaining))
+            except queue.Empty:
+                if self._connection_lost.is_set():
+                    return None
+        return None
 
     def _send_ctl(self, plaintext: bytes) -> None:
         try:
@@ -1037,12 +1098,8 @@ class VPSRelayReceiver:
                         transfer_id  = msg.get("transfer_id", "")
 
                         # ── Security: sanitize file name (path traversal) ─
-                        file_name = Path(raw_name).name  # strip dirs
-                        if (
-                            not file_name
-                            or file_name in (".", "..")
-                            or "\x00" in file_name
-                        ):
+                        file_name = _safe_file_name(raw_name)
+                        if file_name is None:
                             self._log(t("relay_unsafe_filename"))
                             return None
                         # Defense-in-depth: verify resolved path stays in save_dir
@@ -1154,7 +1211,11 @@ class VPSRelayReceiver:
                             self.on_progress(bytes_received, file_size, 0)
 
                     elif msg_type == "relay_done":
-                        total_chunks = msg.get("total_chunks", total_chunks)
+                        announced = msg.get("total_chunks", total_chunks)
+                        if announced != total_chunks:
+                            # total_chunks was validated against file_size in relay_meta
+                            log.warning("relay_done total_chunks %r ignored (expected %d)",
+                                        announced, total_chunks)
                         file_hash    = msg.get("sha256", file_hash)
 
                         missing = sorted(set(range(total_chunks)) - received_seqs)
@@ -1198,8 +1259,10 @@ class VPSRelayReceiver:
 
                             if verified:
                                 _delete_manifest(self._save_dir, file_name)
-                                if save_path.exists():
-                                    save_path.unlink()
+                                final_path = _unique_path(save_path)
+                                if final_path != save_path:
+                                    self._log(t("relay_file_renamed", filename=final_path.name))
+                                    save_path = final_path
                                 temp_path.rename(save_path)
                                 elapsed = time.monotonic() - t0
                                 avg = file_size / elapsed if elapsed > 0 else 0

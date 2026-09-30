@@ -140,3 +140,46 @@ def test_manifest_json_is_sorted_list(tmp_path):
     _save(tmp_path, chunks={5, 0, 1})
     raw = json.loads(_manifest_path(tmp_path, "big.iso").read_text(encoding="utf-8"))
     assert raw["received_chunks"] == [0, 1, 5]
+
+
+# ── File name safety (B6, B11) ──────────────────────────────────────
+
+@pytest.mark.parametrize("raw,expected", [
+    ("report.pdf", "report.pdf"),
+    ("../../evil.txt", "evil.txt"),
+    ("..\\..\\evil.txt", "evil.txt"),
+    ("C:\\Windows\\evil.txt", "evil.txt"),
+    ("/etc/passwd", "passwd"),
+    ("notes.txt:hidden", "notes.txt_hidden"),
+    ("a<b>c|d?.txt", "a_b_c_d_.txt"),
+    ("tab\there.txt", "tab_here.txt"),
+    ("trailing. . ", "trailing"),
+    ("CON", "_CON"),
+    ("nul.txt", "_nul.txt"),
+    ("Com1.log", "_Com1.log"),
+    ("console.txt", "console.txt"),
+    ("Українська назва.docx", "Українська назва.docx"),
+    ("x" * 300, "x" * 255),
+])
+def test_safe_file_name(raw, expected):
+    from app.ws_relay import _safe_file_name
+    assert _safe_file_name(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", ".", "..", "dir/", "a\x00b", None, 42, ". . ."])
+def test_safe_file_name_rejects(raw):
+    from app.ws_relay import _safe_file_name
+    assert _safe_file_name(raw) is None
+
+
+def test_unique_path(tmp_path):
+    from app.ws_relay import _unique_path
+    target = tmp_path / "photo.jpg"
+    assert _unique_path(target) == target
+    target.write_bytes(b"1")
+    assert _unique_path(target).name == "photo (1).jpg"
+    (tmp_path / "photo (1).jpg").write_bytes(b"2")
+    assert _unique_path(target).name == "photo (2).jpg"
+    noext = tmp_path / "README"
+    noext.write_bytes(b"x")
+    assert _unique_path(noext).name == "README (1)"
