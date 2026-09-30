@@ -116,6 +116,18 @@ else:
 
 log = logging.getLogger("relay")
 
+# IP addresses are used in memory (rate limiting) but never written to logs:
+# log lines carry a short tag, a hash of the IP with a salt that changes every
+# day, so lines from one client can be correlated for a day without storing it.
+_LOG_SALT = {"day": "", "salt": b""}
+
+
+def _ip_tag(ip: str) -> str:
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    if _LOG_SALT["day"] != today:
+        _LOG_SALT.update(day=today, salt=os.urandom(16))
+    return "c-" + hashlib.sha256(_LOG_SALT["salt"] + ip.encode()).hexdigest()[:8]
+
 
 # ── Rate limiter ─────────────────────────────────────────────────────
 
@@ -705,7 +717,7 @@ class RelayServer:
 
         # Rate limiting
         if not self._rate_limiter.check(ip):
-            log.warning("Rate limit exceeded for %s", ip)
+            log.warning("Rate limit exceeded for %s", _ip_tag(ip))
             self._analytics.record_rate_limit()
             await ws.close(4029, "rate limit exceeded")
             return
@@ -723,7 +735,7 @@ class RelayServer:
             try:
                 code = await asyncio.wait_for(ws.recv(), timeout=HANDSHAKE_TIMEOUT)
             except asyncio.TimeoutError:
-                log.debug("Handshake timeout for %s", ip)
+                log.debug("Handshake timeout for %s", _ip_tag(ip))
                 return
             except Exception:
                 return
@@ -749,12 +761,12 @@ class RelayServer:
                 room.remove(w)
 
             if len(room) >= 2:
-                log.warning("Room full [%.8s…], rejecting %s", room_id, ip)
+                log.warning("Room full [%.8s…], rejecting %s", room_id, _ip_tag(ip))
                 await ws.close(4001, "room full")
                 return
 
             room.append(ws)
-            log.info("Peer joined room [%.8s…] (%d/2) from %s", room_id, len(room), ip)
+            log.info("Peer joined room [%.8s…] (%d/2) from %s", room_id, len(room), _ip_tag(ip))
 
             # Update peak rooms
             self._analytics.update_peak_rooms(self._stats_basic["active_rooms"])

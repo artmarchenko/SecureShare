@@ -98,7 +98,6 @@ def test_stats_restore_skips_corrupt_tail(mods, tmp_path):
     assert analytics.StatsCollector(tmp_path).lifetime["sessions_completed"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="B9: stats restore only reads the current month's file")
 def test_stats_survive_restart_across_month_boundary(mods, tmp_path, monkeypatch):
     _, analytics = mods
     monkeypatch.setattr(analytics, "_month_key", lambda: "2026-09")
@@ -147,3 +146,55 @@ def test_admin_key_check(mods, monkeypatch):
     assert not analytics.verify_admin_key("")
     monkeypatch.setattr(analytics, "ADMIN_KEY", "")
     assert not analytics.verify_admin_key("")   # unset key disables admin API
+
+
+# ── Privacy: no IP addresses in the relay log ───────────────────────
+
+def test_ip_tag_hides_the_address(mods):
+    relay, _ = mods
+    tag = relay._ip_tag("203.0.113.9")
+    assert tag.startswith("c-") and "203.0.113.9" not in tag
+    assert relay._ip_tag("203.0.113.9") == tag          # stable within a day
+    assert relay._ip_tag("203.0.113.10") != tag
+
+
+def test_connection_logs_do_not_contain_ips(local_relay, caplog):
+    import logging
+    import websocket
+    caplog.set_level(logging.DEBUG, logger="relay")
+    a = websocket.create_connection(local_relay.url, timeout=5)
+    a.send("room-for-log-test")
+    b = websocket.create_connection(local_relay.url, timeout=5)
+    b.send("room-for-log-test")
+    a.send_binary(b"x")
+    assert b.recv() == b"x"
+    a.close()
+    b.close()
+    import time
+    time.sleep(0.3)
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "Peer joined room" in text
+    assert "127.0.0.1" not in text
+
+
+def test_landing_survives_restart_across_month_boundary(mods, tmp_path, monkeypatch):
+    _, analytics = mods
+    monkeypatch.setattr(analytics, "_month_key", lambda: "2026-09")
+    a = analytics.LandingAnalytics(tmp_path)
+    a.record_page_view("1.2.3.4")
+    a.flush()
+    with open(a._writer._current_path(), "a", encoding="utf-8") as f:
+        f.write("{broken\n")                                   # corrupt tail is skipped too
+    monkeypatch.setattr(analytics, "_month_key", lambda: "2026-10")
+    assert analytics.LandingAnalytics(tmp_path)._total_views == 1
+
+
+def test_restore_prefers_newest_month(mods, tmp_path, monkeypatch):
+    _, analytics = mods
+    for month, sessions in (("2026-08", 1), ("2026-09", 2)):
+        monkeypatch.setattr(analytics, "_month_key", lambda m=month: m)
+        c = analytics.StatsCollector(tmp_path)
+        c.lifetime["sessions_completed"] = sessions
+        c.flush_hourly()
+    monkeypatch.setattr(analytics, "_month_key", lambda: "2026-10")
+    assert analytics.StatsCollector(tmp_path).lifetime["sessions_completed"] == 2
