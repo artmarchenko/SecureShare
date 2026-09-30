@@ -121,6 +121,26 @@ def telemetry_sink(monkeypatch):
     return sent
 
 
+# ── Local relay (real server code on loopback) ─────────────────────
+
+@pytest.fixture(scope="session")
+def local_relay(tmp_path_factory):
+    from tests.helpers.local_relay import LocalRelay
+    relay = LocalRelay(tmp_path_factory.mktemp("relay-data"))
+    yield relay
+    relay.close()
+
+
+@pytest.fixture
+def relay(local_relay, monkeypatch):
+    """Point the client at the local relay and make reconnects fast."""
+    from app import ws_relay
+    monkeypatch.setattr(ws_relay, "VPS_RELAY_URL", local_relay.url)
+    monkeypatch.setattr(ws_relay, "RECONNECT_BASE_DELAY", 0.1)
+    monkeypatch.setattr(ws_relay, "RECONNECT_MAX_DELAY", 0.5)
+    return local_relay
+
+
 # ── Misc helpers ────────────────────────────────────────────────────
 
 @pytest.fixture
