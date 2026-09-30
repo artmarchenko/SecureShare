@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from .config import APP_VERSION, VPS_RELAY_URL
+from .config import APP_VERSION
 from .i18n import t
 
 log = logging.getLogger(__name__)
@@ -55,14 +55,11 @@ GITHUB_REPO = "artmarchenko/SecureShare"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASE_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
-# Relay-server based version check (faster, no rate limits)
-_RELAY_BASE = VPS_RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-RELAY_VERSION_URL = f"{_RELAY_BASE}/api/version"
-
 CHECK_COOLDOWN = 24 * 3600   # 24 hours between automatic checks
 REQUEST_TIMEOUT = 10          # seconds for API calls
 DOWNLOAD_TIMEOUT = 300        # seconds for file download
 DOWNLOAD_CHUNK = 64 * 1024   # 64 KB read chunks
+_TEMP_PREFIX = "secureshare_update_"
 
 # Binary size sanity bounds
 MIN_BINARY_SIZE = 1_000_000       # 1 MB — smaller is suspicious
@@ -245,36 +242,13 @@ def fetch_latest_release() -> Optional[ReleaseInfo]:
     )
 
 
-def _quick_version_check() -> Optional[str]:
-    """Fast version check via relay server's /api/version endpoint.
-
-    Returns the latest version string if newer than current, else None.
-    This is faster and has no rate limits (unlike GitHub API).
-    Used as an early-out: if no update via relay, skip GitHub API call.
-    """
-    try:
-        req = urllib.request.Request(
-            RELAY_VERSION_URL,
-            headers={"User-Agent": f"SecureShare/{APP_VERSION}"},
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        latest = data.get("latest_version", "")
-        if latest and is_newer(latest, APP_VERSION):
-            return latest
-    except Exception as exc:
-        log.debug("Relay version check failed (non-critical): %s", exc)
-    return None
-
-
 def check_for_update(force: bool = False) -> Optional[ReleaseInfo]:
     """Check for updates, respecting cooldown and skip settings.
 
-    Strategy:
-      1. Quick check via relay server (/api/version) — fast, no rate limits
-      2. If relay says "up to date" → return None (skip GitHub API)
-      3. If relay says "update available" → fetch details from GitHub API
-      4. If relay unreachable → fall through to GitHub API anyway
+    The GitHub Releases API is the single source of truth: it is what the
+    download links and checksums come from, and one call per 24 h per
+    client is far below its rate limit. (The relay's /api/version endpoint
+    is only used by the landing page.)
 
     Args:
         force: If True, ignore cooldown and skip settings (manual check).
@@ -287,14 +261,6 @@ def check_for_update(force: bool = False) -> Optional[ReleaseInfo]:
             return None
 
     mark_checked()
-
-    # Step 1: Quick relay-based check (fast, no rate limits)
-    relay_version = _quick_version_check()
-    if relay_version is None:
-        # Relay says we're up-to-date OR relay is unreachable
-        # Fall through to GitHub API only if relay was unreachable
-        # (relay_version is None in both cases, so always try GitHub)
-        pass
 
     release = fetch_latest_release()
     if release is None:
@@ -491,7 +457,7 @@ def _extract_tar(archive: Path, dest: Path) -> tuple[Optional[Path], str]:
                 return None, f"Multiple files in archive: {[m.name for m in files]}"
 
             member = files[0]
-            tf.extract(member, dest, set_attrs=False)
+            tf.extract(member, dest, set_attrs=False, filter="data")
 
             extracted = (dest / member.name).resolve()
             if not str(extracted).startswith(str(dest.resolve())):
@@ -577,7 +543,8 @@ def download_and_verify(
       7. Extracted binary size is within sane bounds
 
     Returns (path_to_verified_binary, error_message).
-    The caller is responsible for cleanup of temp files on error.
+    On failure the temporary download directory is removed; on success it
+    is removed by install_and_restart() after the binary is installed.
     """
     is_win = platform.system() == "Windows"
 
@@ -600,7 +567,27 @@ def download_and_verify(
         log.info("[Updater] %s", msg)
 
     # ── 1. Create secure temp directory ───────────────────────────
-    temp_dir = Path(tempfile.mkdtemp(prefix="secureshare_update_"))
+    temp_dir = Path(tempfile.mkdtemp(prefix=_TEMP_PREFIX))
+    binary, err = None, ""
+    try:
+        binary, err = _download_into(temp_dir, release, download_url, expected_size,
+                                     archive_filename, is_win, progress_cb, _status)
+        return binary, err
+    finally:
+        if binary is None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _download_into(
+    temp_dir: Path,
+    release: ReleaseInfo,
+    download_url: str,
+    expected_size: int,
+    archive_filename: str,
+    is_win: bool,
+    progress_cb: Optional[DownloadProgressCB],
+    _status: Callable[[str], None],
+) -> tuple[Optional[Path], str]:
     suffix = ".zip" if is_win else ".tar.gz"
     archive_path = temp_dir / f"update{suffix}"
 
@@ -687,14 +674,20 @@ def download_and_verify(
         return binary_path, ""
 
     except Exception as exc:
-        # Cleanup on error
-        shutil.rmtree(temp_dir, ignore_errors=True)
         return None, f"Download failed: {exc}"
 
 
 # ══════════════════════════════════════════════════════════════════
 #  Install + restart
 # ══════════════════════════════════════════════════════════════════
+
+def _cleanup_download(new_binary: Path) -> None:
+    """Remove the secureshare_update_* temp dir the binary was extracted into."""
+    for parent in new_binary.parents:
+        if parent.name.startswith(_TEMP_PREFIX):
+            shutil.rmtree(parent, ignore_errors=True)
+            return
+
 
 def install_and_restart(
     new_binary: Path,
@@ -788,13 +781,7 @@ def _install_windows(
         )
 
         # 5. Clean up temp download
-        try:
-            new_binary.unlink(missing_ok=True)
-            temp_dir = new_binary.parent
-            if temp_dir.name.startswith("tmp"):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        except OSError:
-            pass
+        _cleanup_download(new_binary)
 
         # 6. Exit the current (old) process
         status_cb(t("updater_exiting_old"))
@@ -831,6 +818,7 @@ def _install_linux(
         # Replace (Linux doesn't lock running binaries)
         shutil.move(str(new_binary), str(current_exe))
         current_exe.chmod(0o755)
+        _cleanup_download(new_binary)
 
         status_cb(t("updater_restarting"))
         log.info("Restarting with new binary: %s", current_exe)
