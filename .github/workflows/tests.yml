@@ -54,6 +54,7 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            server/requirements.txt
 
       - name: System packages for Tk (Linux)
         if: runner.os == 'Linux'
