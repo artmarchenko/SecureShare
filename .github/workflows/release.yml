@@ -162,6 +162,17 @@ jobs:
           }
         shell: pwsh
 
+      - name: Self-test built .exe (UI builds, translations + assets bundled)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\SecureShare.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Get-Content "$env:APPDATA\SecureShare\secureshare.log" -Tail 40 -ErrorAction SilentlyContinue
+            Write-Error "SecureShare.exe --self-test failed (exit $($p.ExitCode))"
+            exit 1
+          }
+          Write-Host "Self-test OK"
+
       - name: Package with version
         run: |
           $tag = "${{ github.ref_name }}"
@@ -204,7 +215,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk
+          sudo apt-get install -y python3-tk xvfb
 
       - name: Install deps
         run: pip install -r requirements.txt pyinstaller==6.19.0
@@ -224,6 +235,9 @@ jobs:
             echo "Binary not found!"
             exit 1
           fi
+
+      - name: Self-test built binary (UI builds, translations + assets bundled)
+        run: xvfb-run -a dist/SecureShare --self-test
 
       - name: Package with version
         run: |

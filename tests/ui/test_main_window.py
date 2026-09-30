@@ -61,13 +61,18 @@ def test_language_choice_survives_restart(app, dialogs, no_update_check):
         i18n.set_language("uk")
 
 
-@pytest.mark.xfail(strict=False, reason="U1: footer is clipped at the default 580x700 size (DPI dependent)")
-def test_footer_fully_visible_at_default_size(app):
-    pump(app, timeout=0.3)
-    footer = app._copyright_lbl
-    bottom = footer.winfo_y() + footer.winfo_height()
-    assert footer.winfo_ismapped()
-    assert bottom <= app.winfo_height()
+@pytest.mark.parametrize("size", ["default", "minimum"])
+def test_footer_and_status_fully_visible(app, size):
+    # U1: at the default size (and at the minimum size) nothing at the bottom is clipped
+    if size == "minimum":
+        import tkinter
+        w, h = tkinter.Tk.wm_minsize(app)   # CTk.minsize() getter is broken; ask Tk (physical px)
+        app.geometry(f"{w}x{h}")
+    pump(app, timeout=0.4)
+    for widget in (app._copyright_lbl, app.cancel_btn):
+        assert widget.winfo_ismapped()
+        bottom = widget.winfo_rooty() + widget.winfo_height()
+        assert bottom <= app.winfo_rooty() + app.winfo_height(), f"{widget} is clipped"
 
 
 def test_copy_log_puts_text_on_clipboard(app):

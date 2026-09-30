@@ -3,6 +3,7 @@ SecureShare — peer-to-peer encrypted file sharing.
 
 Run:  python main.py          (with console)
       pythonw main.py         (no console, logs go to file only)
+      python main.py --self-test   (build the UI, check resources, exit 0/1)
 """
 
 import logging
@@ -44,14 +45,21 @@ logging.basicConfig(
 log = logging.getLogger("secureshare")
 log.info("Log file: %s", _LOG_FILE)
 
+SELF_TEST = "--self-test" in sys.argv
+
 # ── Crash reporting (install early, before any imports that could fail) ──
-from app.telemetry import install_crash_handler
-install_crash_handler()
+# Not in self-test mode: CI failures must not be reported to the relay.
+if not SELF_TEST:
+    from app.telemetry import install_crash_handler
+    install_crash_handler()
 
 from app.gui import App
 
 
 def main():
+    if SELF_TEST:
+        from app.selftest import run
+        sys.exit(run())
     app = App()
     app.mainloop()
 

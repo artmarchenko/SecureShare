@@ -150,3 +150,14 @@ def test_verify_dialog_window_close_means_reject(app):
     dlg.tk.call(dlg.protocol("WM_DELETE_WINDOW"))  # what the [X] button runs
     assert pump(app, lambda: not t.is_alive(), timeout=5)
     assert result == [False]
+
+
+def test_verify_dialog_times_out_and_closes(app, monkeypatch):
+    # B5: an unanswered dialog is closed and the transfer is rejected
+    from app import gui
+    monkeypatch.setattr(gui, "VERIFY_TIMEOUT", 0.5)
+    dlg, result, t = _open_verify(app)
+    assert pump(app, lambda: not t.is_alive(), timeout=5)
+    assert result == [False]
+    assert pump(app, lambda: find_toplevel(app, i18n.t("verify_title")) is None, timeout=2)
+    assert i18n.t("verify_timeout") in app.status_box.get("1.0", "end")
