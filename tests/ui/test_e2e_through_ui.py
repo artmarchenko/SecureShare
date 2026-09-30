@@ -94,3 +94,76 @@ def test_gui_rejecting_code_aborts_both_sides(app, dialogs, relay, tmp_path):
     assert pump(app, lambda: not worker.is_alive(), timeout=15)
     assert received == [None]
     assert app.status_indicator.cget("text") == i18n.t("state_error")
+
+
+# ── Status indicator sequence (characterisation for the typed-state refactor) ──
+
+def _record_states(app, monkeypatch):
+    seen = []
+    original = type(app)._set_state
+
+    def recording(self, state):
+        if not seen or seen[-1] != state:
+            seen.append(state)
+        return original(self, state)
+    monkeypatch.setattr(type(app), "_set_state", recording)
+    return seen
+
+
+def test_state_sequence_gui_sender(app, dialogs, relay, tmp_path, monkeypatch):
+    states = _record_states(app, monkeypatch)
+    src = tmp_path / "s.bin"
+    src.write_bytes(os.urandom(2 * VPS_CHUNK_SIZE))
+    dialogs.open_file = str(src)
+    app._browse_file()
+    app.send_btn.invoke()
+    assert pump(app, lambda: CODE_RE.fullmatch(app.send_code_label.cget("text")), timeout=3)
+    receiver = VPSRelayReceiver(app.send_code_label.cget("text"), tmp_path / "in", on_verify=lambda c: True)
+    (tmp_path / "in").mkdir()
+    worker = threading.Thread(target=receiver.receive, daemon=True)
+    worker.start()
+    _confirm_verify_dialog(app)
+    assert pump(app, lambda: app.status_indicator.cget("text") == i18n.t("state_done"), timeout=60)
+    pump(app, lambda: not worker.is_alive(), timeout=15)
+    assert states == ["idle", "connecting", "waiting", "key_exchange", "verifying",
+                      "waiting", "transferring", "waiting", "done"]
+
+
+def test_state_sequence_gui_receiver(app, relay, tmp_path, monkeypatch):
+    states = _record_states(app, monkeypatch)
+    src = tmp_path / "r.bin"
+    src.write_bytes(os.urandom(2 * VPS_CHUNK_SIZE))
+    inbox = tmp_path / "in"
+    inbox.mkdir()
+    code = "stat-" + os.urandom(2).hex()
+    sender = VPSRelaySender(code, src, on_verify=lambda c: True)
+    worker = threading.Thread(target=sender.send, daemon=True)
+    worker.start()
+    app._save_dir = str(inbox)
+    app.recv_code_entry.insert(0, code)
+    app.recv_btn.invoke()
+    _confirm_verify_dialog(app)
+    assert pump(app, lambda: app.status_indicator.cget("text") == i18n.t("state_done"), timeout=60)
+    pump(app, lambda: not worker.is_alive(), timeout=15)
+    assert states == ["idle", "connecting", "waiting", "key_exchange", "verifying",
+                      "waiting", "transferring", "done"]
+
+
+def test_state_sequence_rejected_code(app, dialogs, relay, tmp_path, monkeypatch):
+    states = _record_states(app, monkeypatch)
+    src = tmp_path / "x.bin"
+    src.write_bytes(b"secret")
+    dialogs.open_file = str(src)
+    app._browse_file()
+    app.send_btn.invoke()
+    assert pump(app, lambda: CODE_RE.fullmatch(app.send_code_label.cget("text")), timeout=3)
+    receiver = VPSRelayReceiver(app.send_code_label.cget("text"), tmp_path, on_verify=lambda c: True)
+    worker = threading.Thread(target=receiver.receive, daemon=True)
+    worker.start()
+    title = i18n.t("verify_title")
+    assert pump(app, lambda: find_toplevel(app, title) is not None, timeout=15)
+    find_button(find_toplevel(app, title), i18n.t("btn_cancel_verify")).invoke()
+    assert pump(app, lambda: app.send_btn.cget("state") == "normal", timeout=30)
+    pump(app, lambda: not worker.is_alive(), timeout=15)
+    assert states[-1] == "error"
+    assert states[:5] == ["idle", "connecting", "waiting", "key_exchange", "verifying"]
