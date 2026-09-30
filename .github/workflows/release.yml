@@ -4,7 +4,8 @@
 #  Triggered by pushing a tag matching v* (e.g. v3.0.0).
 #
 #  1. Lint + import check (ubuntu, fast)
-#  2. Server tests against live VPS (ubuntu)
+#  1b. Full test suite on Windows + Linux (tests.yml) — gates the builds
+#  2. Server smoke tests against live VPS (ubuntu)
 #  3. Build .exe (windows-latest, PyInstaller)
 #  4. Build Linux binary (ubuntu-latest, PyInstaller)
 #  5. Create GitHub Release with Windows + Linux assets
@@ -67,6 +68,12 @@ jobs:
           print(f'{APP_NAME} v{APP_VERSION} proto={PROTOCOL_VERSION} — OK')
           "
 
+  # ── Job 1b: Full test suite (release gate) ──────────────────
+  tests:
+    name: Test suite
+    needs: lint
+    uses: ./.github/workflows/tests.yml
+
   # ── Job 2: Server Tests ─────────────────────────────────────
   server-tests:
     name: Server Tests (live VPS)
@@ -121,7 +128,7 @@ jobs:
     name: Build Windows .exe
     runs-on: windows-latest
     timeout-minutes: 15
-    needs: lint
+    needs: [lint, tests]
 
     steps:
       - uses: actions/checkout@v4
@@ -179,7 +186,7 @@ jobs:
     name: Build Linux Binary
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: lint
+    needs: [lint, tests]
 
     steps:
       - uses: actions/checkout@v4

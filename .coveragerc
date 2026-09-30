@@ -1,0 +1,12 @@
+[run]
+source =
+    app
+    server
+omit =
+    server/test_relay.py
+concurrency = thread
+
+[report]
+show_missing = False
+skip_empty = True
+fail_under = 75
