@@ -45,3 +45,9 @@ MARKETING.md
 
 # Claude Code personal settings
 .claude/settings.local.json
+
+# Test artefacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
