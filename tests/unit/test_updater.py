@@ -298,7 +298,6 @@ def test_check_for_update_respects_skip_and_downgrade(cdn, monkeypatch):
     import json
     cdn.files["/latest"] = json.dumps({"tag_name": "v99.0.0", "assets": []}).encode()
     monkeypatch.setattr(updater, "GITHUB_API_URL", cdn.url("/latest"))
-    monkeypatch.setattr(updater, "RELAY_VERSION_URL", cdn.url("/nope"))
     monkeypatch.setattr(updater, "should_check_now", lambda: True)
     updater.clear_skipped()
     assert updater.check_for_update(force=False).version == "99.0.0"
@@ -309,3 +308,46 @@ def test_check_for_update_respects_skip_and_downgrade(cdn, monkeypatch):
 
     cdn.files["/latest"] = json.dumps({"tag_name": "v0.0.1", "assets": []}).encode()
     assert updater.check_for_update(force=True) is None
+
+
+# ── Temp directory hygiene (B3) and single source of truth (B4) ─────
+
+def _update_dirs():
+    import tempfile
+    from pathlib import Path
+    return {p.name for p in Path(tempfile.gettempdir()).glob("secureshare_update_*")}
+
+
+def test_failed_download_leaves_no_temp_dir(cdn, windows):
+    before = _update_dirs()
+    arc = make_zip({"SecureShare.exe": fake_pe()})
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", None, size=1))
+    assert binary is None and "Size mismatch" in err
+    assert _update_dirs() == before
+
+
+def test_successful_download_is_cleaned_after_install(cdn, windows):
+    before = _update_dirs()
+    arc = make_zip({"SecureShare.exe": fake_pe()})
+    sums = f"{hashlib.sha256(arc).hexdigest()}  SecureShare-v9.9.9.zip\n".encode()
+    binary, _ = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", sums))
+    assert binary.exists() and _update_dirs() != before
+    updater._cleanup_download(binary)
+    assert _update_dirs() == before
+
+
+def test_update_check_only_asks_github(cdn, monkeypatch):
+    import json
+    cdn.files["/latest"] = json.dumps({"tag_name": "v0.0.1", "assets": []}).encode()
+    monkeypatch.setattr(updater, "GITHUB_API_URL", cdn.url("/latest"))
+    assert updater.check_for_update(force=True) is None
+    assert cdn.requests == ["/latest"]
+    assert not hasattr(updater, "RELAY_VERSION_URL")
+
+
+def test_tar_extraction_uses_data_filter(tmp_path, recwarn):
+    arc = tmp_path / "a.tar.gz"
+    arc.write_bytes(make_tar({"SecureShare": b"\x7fELF"}))
+    out, err = _extract_tar(arc, tmp_path / "x")
+    assert err == ""
+    assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning) and "tar" in str(w.message)]
