@@ -13,7 +13,6 @@ from app.ws_relay import (
     _delete_manifest,
     _is_dns_error,
     _load_manifest,
-    _make_reconnect_token,
     _make_transfer_id,
     _manifest_path,
     _save_manifest,
@@ -59,21 +58,6 @@ def test_transfer_id_is_deterministic_and_input_sensitive():
     assert base != _make_transfer_id("b.zip", 100, "f" * 64)
     assert base != _make_transfer_id("a.zip", 101, "f" * 64)
     assert base != _make_transfer_id("a.zip", 100, "e" * 64)
-
-
-def test_reconnect_token_depends_on_key_and_code():
-    from app.crypto_utils import CryptoSession
-
-    def pair():
-        a, b = CryptoSession("ab12-cd34"), CryptoSession("ab12-cd34")
-        a.derive_shared_key(b.get_public_key_bytes())
-        b.derive_shared_key(a.get_public_key_bytes())
-        return a, b
-    a, b = pair()
-    t1 = _make_reconnect_token(a, "ab12-cd34")
-    assert t1 == _make_reconnect_token(b, "ab12-cd34")          # both peers agree
-    assert t1 != _make_reconnect_token(pair()[0], "ab12-cd34")  # new key -> new token
-    assert t1 != _make_reconnect_token(a, "zz99-yy88")
 
 
 def test_sha256_file(tmp_path):

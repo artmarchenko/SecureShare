@@ -11,8 +11,8 @@ VPS_MAX_FILE_SIZE = 5 * 1024**3        # 5 GiB — server session limit
 VPS_CHUNK_SIZE = 512 * 1024            # 512 KB per WebSocket chunk
 
 # ── Protocol Version ──────────────────────────────────────────────
-PROTOCOL_VERSION     = 1   # current wire-protocol version
-MIN_PROTOCOL_VERSION = 1   # minimum compatible version (reject older)
+PROTOCOL_VERSION     = 2   # current wire-protocol version (commit-reveal, room IDs)
+MIN_PROTOCOL_VERSION = 2   # v1 is not accepted: its MITM weaknesses cannot be negotiated away
 
 # ── Session ────────────────────────────────────────────────────────
 SESSION_CODE_LENGTH = 8
