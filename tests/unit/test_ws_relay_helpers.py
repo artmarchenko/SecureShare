@@ -227,3 +227,57 @@ def test_emit_reports_text_and_state():
     r._emit("relay_saved", filename="a.txt", speed="1.0")
     assert len(texts) == 3
     assert states == [TransferState.CONNECTING, TransferState.DONE]
+
+
+# ── Reconnect loop and disk writer (A3) ─────────────────────────────
+
+def test_cancel_interrupts_reconnect_backoff(monkeypatch):
+    import threading
+    from app.ws_relay import VPSRelayReceiver, _Attempt
+    monkeypatch.setattr(ws_relay, "RECONNECT_BASE_DELAY", 30)
+    r = VPSRelayReceiver("ab12-cd34", ".")
+    attempts = []
+
+    def attempt(is_reconnect):
+        attempts.append(is_reconnect)
+        return _Attempt.RETRY, None
+    result = []
+    worker = threading.Thread(target=lambda: result.append(r._run_with_reconnect(attempt, "failed")))
+    worker.start()
+    time.sleep(0.3)                       # first attempt done, now in a 30 s backoff
+    t0 = time.monotonic()
+    r.cancel()
+    worker.join(5)
+    assert not worker.is_alive() and time.monotonic() - t0 < 1
+    assert attempts == [False] and result == ["failed"]
+
+
+def test_reconnect_loop_gives_up_after_max_retries(monkeypatch):
+    from app.ws_relay import VPSRelaySender, _Attempt
+    monkeypatch.setattr(ws_relay, "RECONNECT_BASE_DELAY", 0)
+    s = VPSRelaySender("ab12-cd34", __file__, on_status=lambda m: None)
+    calls = []
+    out = s._run_with_reconnect(lambda rc: calls.append(rc) or (_Attempt.RETRY, None), failure=False)
+    assert out is False
+    assert calls == [False] + [True] * ws_relay.RECONNECT_MAX_RETRIES
+
+
+def test_reconnect_loop_stops_on_fatal_and_returns_success_value():
+    from app.ws_relay import VPSRelayReceiver, _Attempt
+    r = VPSRelayReceiver("ab12-cd34", ".")
+    assert r._run_with_reconnect(lambda rc: (_Attempt.FATAL, "x"), failure=None) is None
+    assert r._run_with_reconnect(lambda rc: (_Attempt.SUCCESS, "saved"), failure=None) == "saved"
+
+
+def test_disk_writer_out_of_order_chunks(tmp_path):
+    from app.ws_relay import _DiskWriter
+    path = tmp_path / "f.part"
+    w = _DiskWriter(path, chunk_size=4, resume=False, size=10)
+    assert w.put(2, b"IJ") and w.put(0, b"ABCD") and w.put(1, b"EFGH")
+    w.finish()
+    w.close()                                 # idempotent
+    assert path.read_bytes() == b"ABCDEFGHIJ"
+    w2 = _DiskWriter(path, chunk_size=4, resume=True)
+    w2.put(1, b"xxxx")
+    w2.finish()
+    assert path.read_bytes() == b"ABCDxxxxIJ"
