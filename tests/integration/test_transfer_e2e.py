@@ -90,7 +90,7 @@ def test_both_sides_see_same_verification_code(transfer, tmp_path):
     assert seen["s"] == seen["r"]
 
 
-def test_cancel_mid_transfer_keeps_resume_state(transfer, tmp_path):
+def test_cancel_mid_transfer_keeps_resume_state(transfer, tmp_path, slow_sender):
     src = tmp_path / "big.bin"
     src.write_bytes(os.urandom(40 * VPS_CHUNK_SIZE))
     run = transfer(src)

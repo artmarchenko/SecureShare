@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -73,3 +74,14 @@ def transfer(relay, tmp_path):
         )
         return run
     return _make
+
+
+@pytest.fixture
+def slow_sender(monkeypatch):
+    """Throttle the sender so a transfer lasts long enough to interrupt reliably."""
+    original = VPSRelaySender._send_dat
+
+    def throttled(self, seq, chunk):
+        time.sleep(0.03)
+        return original(self, seq, chunk)
+    monkeypatch.setattr(VPSRelaySender, "_send_dat", throttled)

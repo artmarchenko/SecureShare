@@ -28,7 +28,7 @@ def _stop_after(run, fraction: float) -> threading.Event:
     return gate
 
 
-def test_resume_skips_already_received_chunks(transfer, tmp_path):
+def test_resume_skips_already_received_chunks(transfer, tmp_path, slow_sender):
     src = _big_file(tmp_path)
 
     first = transfer(src)
@@ -50,7 +50,7 @@ def test_resume_skips_already_received_chunks(transfer, tmp_path):
     assert not (tmp_path / "inbox" / "big.bin.part.resume").exists()
 
 
-def test_resume_ignored_for_different_file_with_same_name(transfer, tmp_path):
+def test_resume_ignored_for_different_file_with_same_name(transfer, tmp_path, slow_sender):
     src = _big_file(tmp_path)
     first = transfer(src)
     gate = _stop_after(first, 0.3)
@@ -66,7 +66,7 @@ def test_resume_ignored_for_different_file_with_same_name(transfer, tmp_path):
     assert "relay_resume_found" not in second.receiver_log
 
 
-def test_auto_reconnect_after_network_drop(transfer, tmp_path, relay):
+def test_auto_reconnect_after_network_drop(transfer, tmp_path, relay, slow_sender):
     src = _big_file(tmp_path)
     verify_calls = []
 
