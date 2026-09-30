@@ -59,6 +59,7 @@ import struct
 import threading
 import time
 import zlib
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
@@ -178,12 +179,50 @@ _STATE_FOR_MESSAGE: dict[str, TransferState] = {
 del _S
 
 
+class _Attempt(Enum):
+    """Outcome of one connect-and-transfer attempt."""
+    SUCCESS = "success"
+    FATAL   = "fatal"     # do not retry (cancel, rejected code, invalid data, ...)
+    RETRY   = "retry"     # connection-level problem: reconnect and try again
+
+
 class _RelayPeer:
-    """Behaviour shared by VPSRelaySender and VPSRelayReceiver."""
+    """Behaviour shared by VPSRelaySender and VPSRelayReceiver.
+
+    Subclasses set `_ROLE` / `_WAITING_KEY` and implement one attempt; this
+    base class owns the reconnect loop, the session handshake and cancel.
+    """
 
     _ROLE = "Peer"
-    on_status: Optional[StatusCB]
-    on_state: Optional[StateCB]
+    _WAITING_KEY = ""          # status message shown while waiting for the peer
+
+    def __init__(
+        self,
+        session_code: str,
+        on_progress: Optional[ProgressCB],
+        on_status: Optional[StatusCB],
+        on_verify: Optional[VerifyCB],
+        on_state: Optional[StateCB],
+    ) -> None:
+        self._code       = session_code
+        self.on_progress = on_progress
+        self.on_status   = on_status
+        self.on_state    = on_state
+        self.on_verify   = on_verify or (lambda code: True)
+        self._cancelled  = False
+        self._cancel_event = threading.Event()
+        self._ws: Optional[websocket.WebSocket] = None
+        self._crypto: Optional[CryptoSession] = None
+        self._reconnect_token: Optional[str] = None
+
+    # ── Public ────────────────────────────────────────────────────
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        self._cancel_event.set()
+        self._close()
+
+    # ── Status reporting ──────────────────────────────────────────
 
     def _emit(self, key: str, **fmt) -> None:
         """Log a translated status message and report the phase it implies."""
@@ -194,6 +233,104 @@ class _RelayPeer:
         state = _STATE_FOR_MESSAGE.get(key)
         if state is not None and self.on_state:
             self.on_state(state)
+
+    # ── Reconnect loop ────────────────────────────────────────────
+
+    def _run_with_reconnect(self, attempt: Callable[[bool], tuple], failure):
+        """Call `attempt(is_reconnect)` until it succeeds, fails for good,
+        or RECONNECT_MAX_RETRIES reconnects are used up.
+
+        `attempt` returns (_Attempt, value); `value` is returned on SUCCESS,
+        `failure` otherwise.
+        """
+        for n in range(RECONNECT_MAX_RETRIES + 1):
+            if self._cancelled:
+                return failure
+            if n > 0 and not self._backoff(n):
+                return failure
+            self._before_attempt()
+            try:
+                outcome, value = attempt(n > 0)
+                if outcome is _Attempt.SUCCESS:
+                    return value
+                if outcome is _Attempt.FATAL or self._cancelled:
+                    return failure
+                self._emit("relay_connection_lost")
+            except Exception as exc:
+                self._emit("transfer_error_generic", error=str(exc))
+                log.exception("%s error", type(self).__name__)
+            finally:
+                self._close()
+        self._emit("relay_retries_exhausted")
+        return failure
+
+    def _backoff(self, n: int) -> bool:
+        """Wait before reconnect attempt `n`. Returns False if cancelled."""
+        delay = min(RECONNECT_BASE_DELAY * 2 ** (n - 1), RECONNECT_MAX_DELAY)
+        self._emit("relay_reconnecting", delay=f"{delay:.0f}", attempt=n, max=RECONNECT_MAX_RETRIES)
+        return not self._cancel_event.wait(delay)
+
+    def _before_attempt(self) -> None:
+        """Hook: reset per-attempt state."""
+
+    # ── Session setup (connect → key exchange → verification) ─────
+
+    def _open_session(self, is_reconnect: bool) -> Optional[_Attempt]:
+        """Connect to the relay and establish a verified E2E session.
+
+        Returns None on success, otherwise how the attempt should end.
+        """
+        self._emit("relay_reconnecting_to" if is_reconnect else "relay_connecting_to")
+        try:
+            self._ws = websocket.WebSocket()
+            self._ws.connect(VPS_RELAY_URL, timeout=30)
+            self._ws.settimeout(300)       # 5 min to wait for the peer
+            self._ws.send(self._code)      # register session code
+        except Exception as exc:
+            self._emit("relay_connect_error", error=str(exc))
+            # DNS failures are transient — always allow retry
+            if is_reconnect or _is_dns_error(exc):
+                return _Attempt.RETRY
+            return _Attempt.FATAL
+
+        self._emit(self._WAITING_KEY)
+
+        self._crypto, peer_token = _do_key_exchange(
+            self._ws, self._code, self._emit,
+            reconnect_token=self._reconnect_token,
+        )
+        if not self._crypto:
+            return _Attempt.RETRY if is_reconnect else _Attempt.FATAL
+
+        # Token for the *next* reconnect comes from this new key exchange
+        new_token = _make_reconnect_token(self._crypto, self._code)
+        sig_key = derive_signaling_key(self._code)
+        self._ws.settimeout(120)
+
+        # Auto-verify on reconnect if the peer proved the previous session
+        # (timing-safe comparison to prevent side-channel leaks)
+        auto_verify = (
+            is_reconnect
+            and self._reconnect_token is not None
+            and peer_token is not None
+            and hmac.compare_digest(peer_token, self._reconnect_token)
+        )
+        if not _do_verification(
+            self._ws, self._crypto, sig_key,
+            self.on_verify, self._emit,
+            auto_verify=auto_verify,
+        ):
+            return _Attempt.FATAL          # verification rejected
+
+        self._reconnect_token = new_token
+        return None
+
+    def _close(self) -> None:
+        try:
+            if self._ws:
+                self._ws.close()
+        except Exception:
+            pass
 
 
 _SIG = 0x53   # 'S'  signaling frame (key exchange / verification)
@@ -565,6 +702,7 @@ class VPSRelaySender(_RelayPeer):
     """
 
     _ROLE = "Sender"
+    _WAITING_KEY = "relay_waiting_receiver"
 
     def __init__(
         self,
@@ -575,31 +713,18 @@ class VPSRelaySender(_RelayPeer):
         on_verify:   Optional[VerifyCB]   = None,
         on_state:    Optional[StateCB]    = None,
     ):
-        self._code       = session_code
-        self._filepath   = Path(filepath)
-        self.on_progress = on_progress
-        self.on_status   = on_status
-        self.on_state    = on_state
-        self.on_verify   = on_verify or (lambda code: True)
-        self._cancelled  = False
-        self._ws: Optional[websocket.WebSocket] = None
-        self._crypto: Optional[CryptoSession] = None
+        super().__init__(session_code, on_progress, on_status, on_verify, on_state)
+        self._filepath = Path(filepath)
         self._ctl_queue: queue.Queue = queue.Queue()
         self._connection_lost = threading.Event()
 
         # Cached file metadata (computed once, reused across reconnects)
         self._file_hash: Optional[str] = None
         self._transfer_id: Optional[str] = None
-        self._reconnect_token: Optional[str] = None
 
     def cancel(self) -> None:
-        self._cancelled = True
         self._connection_lost.set()
-        try:
-            if self._ws:
-                self._ws.close()
-        except Exception:
-            pass
+        super().cancel()
 
     # ── Public entry point (with auto-reconnect) ──────────────────
 
@@ -626,103 +751,28 @@ class VPSRelaySender(_RelayPeer):
             self._emit("relay_file_read_error", error=str(exc))
             return False
 
-        for attempt in range(RECONNECT_MAX_RETRIES + 1):
-            if self._cancelled:
-                return False
+        return self._run_with_reconnect(self._send_attempt, failure=False)
 
-            if attempt > 0:
-                delay = min(
-                    RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
-                    RECONNECT_MAX_DELAY,
-                )
-                self._emit("relay_reconnecting",
-                           delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES)
-                time.sleep(delay)
-                if self._cancelled:
-                    return False
+    def _before_attempt(self) -> None:
+        self._connection_lost.clear()
+        self._ctl_queue = queue.Queue()
 
-            self._connection_lost.clear()
-            self._ctl_queue = queue.Queue()
+    def _send_attempt(self, is_reconnect: bool = False) -> tuple[_Attempt, bool]:
+        """Single send attempt: (_Attempt, sent_ok)."""
+        failed = self._open_session(is_reconnect)
+        if failed is not None:
+            return failed, False
+        result = self._transfer()
+        if result is True:
+            return _Attempt.SUCCESS, True
+        return (_Attempt.RETRY if result is None else _Attempt.FATAL), False
 
-            try:
-                result = self._send_attempt(is_reconnect=(attempt > 0))
-                if result is True:
-                    return True
-                if result is False:
-                    # Permanent failure (cancel, verification rejected, etc.)
-                    return False
-                # result is None → connection lost, retry
-                self._emit("relay_connection_lost")
-            except Exception as exc:
-                self._emit("transfer_error_generic", error=str(exc))
-                log.exception("VPSRelaySender error")
-            finally:
-                self._close()
+    def _transfer(self) -> Optional[bool]:
+        """Send metadata + chunks over an established session.
 
-        self._emit("relay_retries_exhausted")
-        return False
-
-    def _send_attempt(self, is_reconnect: bool = False) -> Optional[bool]:
-        """Single send attempt.
-
-        Returns:
-          True  — success
-          False — permanent failure (don't retry)
-          None  — connection lost (can retry)
+        Returns True (done), False (permanent failure) or None (connection
+        lost — retryable).
         """
-        # ── 1. Connect to VPS ─────────────────────────────────────
-        if is_reconnect:
-            self._emit("relay_reconnecting_to")
-        else:
-            self._emit("relay_connecting_to")
-        try:
-            self._ws = websocket.WebSocket()
-            self._ws.connect(VPS_RELAY_URL, timeout=30)
-            self._ws.settimeout(300)       # 5 min to wait for peer
-            self._ws.send(self._code)      # register session code
-        except Exception as exc:
-            self._emit("relay_connect_error", error=str(exc))
-            # DNS failures are transient — always allow retry
-            if _is_dns_error(exc):
-                return None
-            return None if is_reconnect else False
-
-        self._emit("relay_waiting_receiver")
-
-        # ── 2. Key exchange ───────────────────────────────────────
-        self._crypto, peer_token = _do_key_exchange(
-            self._ws, self._code, self._emit,
-            reconnect_token=self._reconnect_token,
-        )
-        if not self._crypto:
-            return None if is_reconnect else False
-
-        # Compute reconnect token from NEW shared key
-        new_token = _make_reconnect_token(self._crypto, self._code)
-
-        # ── 3. Verification ───────────────────────────────────────
-        sig_key = derive_signaling_key(self._code)
-        self._ws.settimeout(120)
-
-        # Auto-verify on reconnect if peer sent a matching token
-        # (timing-safe comparison to prevent side-channel leaks)
-        auto_verify = (
-            is_reconnect
-            and self._reconnect_token is not None
-            and peer_token is not None
-            and hmac.compare_digest(peer_token, self._reconnect_token)
-        )
-
-        if not _do_verification(
-            self._ws, self._crypto, sig_key,
-            self.on_verify, self._emit,
-            auto_verify=auto_verify,
-        ):
-            return False  # verification rejected = permanent failure
-
-        # Save reconnect token (from the NEW key exchange)
-        self._reconnect_token = new_token
-
         # ── 4. Start background receiver ──────────────────────────
         recv_thread = threading.Thread(target=self._recv_worker, daemon=True)
         recv_thread.start()
@@ -926,13 +976,6 @@ class VPSRelaySender(_RelayPeer):
         finally:
             self._connection_lost.set()
 
-    def _close(self) -> None:
-        try:
-            if self._ws:
-                self._ws.close()
-        except Exception:
-            pass
-
 
 # ════════════════════════════════════════════════════════════════════
 #  VPSRelayReceiver
@@ -948,6 +991,7 @@ class VPSRelayReceiver(_RelayPeer):
     """
 
     _ROLE = "Receiver"
+    _WAITING_KEY = "relay_waiting_sender"
 
     def __init__(
         self,
@@ -958,26 +1002,8 @@ class VPSRelayReceiver(_RelayPeer):
         on_verify:   Optional[VerifyCB]   = None,
         on_state:    Optional[StateCB]    = None,
     ):
-        self._code       = session_code
-        self._save_dir   = Path(save_dir)
-        self.on_progress = on_progress
-        self.on_status   = on_status
-        self.on_state    = on_state
-        self.on_verify   = on_verify or (lambda code: True)
-        self._cancelled  = False
-        self._ws: Optional[websocket.WebSocket] = None
-        self._crypto: Optional[CryptoSession] = None
-
-        self._reconnect_token: Optional[str] = None
-        self._retryable = False  # set to True on connection-level errors
-
-    def cancel(self) -> None:
-        self._cancelled = True
-        try:
-            if self._ws:
-                self._ws.close()
-        except Exception:
-            pass
+        super().__init__(session_code, on_progress, on_status, on_verify, on_state)
+        self._save_dir = Path(save_dir)
 
     # ── Public entry point (with auto-reconnect) ──────────────────
 
@@ -990,429 +1016,222 @@ class VPSRelayReceiver(_RelayPeer):
         if not _HAS_WS:
             self._emit("relay_need_ws")
             return None
+        return self._run_with_reconnect(self._receive_attempt, failure=None)
 
-        for attempt in range(RECONNECT_MAX_RETRIES + 1):
-            if self._cancelled:
-                return None
+    def _receive_attempt(self, is_reconnect: bool = False) -> tuple[_Attempt, Optional[Path]]:
+        """Single receive attempt: (_Attempt, saved_path)."""
+        failed = self._open_session(is_reconnect)
+        if failed is not None:
+            return failed, None
 
-            if attempt > 0:
-                delay = min(
-                    RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
-                    RECONNECT_MAX_DELAY,
-                )
-                self._emit("relay_reconnecting",
-                           delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES)
-                time.sleep(delay)
-                if self._cancelled:
-                    return None
-
-            self._retryable = False
-
-            try:
-                result = self._receive_attempt(is_reconnect=(attempt > 0))
-                if result is not None:
-                    return result  # success (Path)
-                if not self._retryable or self._cancelled:
-                    return None   # permanent failure
-                # retryable → continue loop
-                self._emit("relay_connection_lost")
-            except Exception as exc:
-                self._emit("transfer_error_generic", error=str(exc))
-                log.exception("VPSRelayReceiver error")
-            finally:
-                self._close()
-
-        self._emit("relay_retries_exhausted")
-        return None
-
-    def _receive_attempt(self, is_reconnect: bool = False) -> Optional[Path]:
-        """Single receive attempt.
-
-        Returns Path on success, None on failure.
-        Sets self._retryable = True if the failure is connection-related.
-        """
-        # ── 1. Connect to VPS ─────────────────────────────────────
-        if is_reconnect:
-            self._emit("relay_reconnecting_to")
-        else:
-            self._emit("relay_connecting_to")
-        try:
-            self._ws = websocket.WebSocket()
-            self._ws.connect(VPS_RELAY_URL, timeout=30)
-            self._ws.settimeout(300)
-            self._ws.send(self._code)
-        except Exception as exc:
-            self._emit("relay_connect_error", error=str(exc))
-            # DNS failures are transient — always allow retry
-            self._retryable = is_reconnect or _is_dns_error(exc)
-            return None
-
-        self._emit("relay_waiting_sender")
-
-        # ── 2. Key exchange ───────────────────────────────────────
-        self._crypto, peer_token = _do_key_exchange(
-            self._ws, self._code, self._emit,
-            reconnect_token=self._reconnect_token,
-        )
-        if not self._crypto:
-            self._retryable = is_reconnect
-            return None
-
-        new_token = _make_reconnect_token(self._crypto, self._code)
-
-        # ── 3. Verification ───────────────────────────────────────
-        sig_key = derive_signaling_key(self._code)
-        self._ws.settimeout(120)
-
-        # Timing-safe comparison to prevent side-channel leaks
-        auto_verify = (
-            is_reconnect
-            and self._reconnect_token is not None
-            and peer_token is not None
-            and hmac.compare_digest(peer_token, self._reconnect_token)
-        )
-
-        if not _do_verification(
-            self._ws, self._crypto, sig_key,
-            self.on_verify, self._emit,
-            auto_verify=auto_verify,
-        ):
-            return None  # permanent failure (verification rejected)
-
-        self._reconnect_token = new_token
-
-        # ── 4. Receive file ───────────────────────────────────────
         self._emit("relay_waiting_meta")
         self._ws.settimeout(120)
 
-        file_name:      Optional[str]  = None
-        file_size:      int            = 0
-        file_hash:      str            = ""
-        transfer_id:    str            = ""
-        chunk_size:     int            = VPS_CHUNK_SIZE
-        total_chunks:   int            = 0
-        received_seqs:  set[int]       = set()
-        bytes_received: int            = 0
-        save_path:      Optional[Path] = None
-        temp_path:      Optional[Path] = None
-        out_file                       = None
-        is_resume:      bool           = False
-        chunks_since_save: int         = 0
-        t0 = time.monotonic()
-        last_prog = t0
-
-        # Async disk writer (keeps receive loop fast)
-        write_queue: queue.Queue = queue.Queue(maxsize=512)
-        writer_thread: Optional[threading.Thread] = None
-
-        def _writer() -> None:
-            writes = 0
-            while True:
-                item = write_queue.get()
-                if item is None:
-                    if out_file and not out_file.closed:
-                        try:
-                            out_file.flush()
-                        except Exception:
-                            pass
-                    write_queue.task_done()
-                    break
-                s, data = item
-                try:
-                    out_file.seek(s * chunk_size)
-                    out_file.write(data)
-                    writes += 1
-                    if writes % 128 == 0:
-                        out_file.flush()
-                except Exception:
-                    pass
-                write_queue.task_done()
-
+        rx = _Incoming()
         try:
             while not self._cancelled:
                 try:
                     raw = self._ws.recv()
                 except Exception:
-                    # Connection lost during transfer → retryable
-                    if file_name and received_seqs and not self._cancelled:
-                        self._retryable = True
-                    break
+                    # Connection lost: worth retrying once data has started to flow
+                    retry = rx.file_name and rx.received and not self._cancelled
+                    return (_Attempt.RETRY if retry else _Attempt.FATAL), None
 
                 if not raw or not isinstance(raw, bytes):
                     continue
 
-                msg_type = raw[0]
-
-                # ── Control frame ──────────────────────────────────
-                if msg_type == _CTL:
+                if raw[0] == _CTL:
                     try:
                         msg = json.loads(self._crypto.decrypt(raw[1:]))
                     except Exception:
                         continue
+                    kind = msg.get("type")
+                    if kind == "relay_meta":
+                        if not self._on_meta(msg, rx):
+                            return _Attempt.FATAL, None
+                    elif kind == "relay_done":
+                        done = self._on_done(msg, rx)
+                        if done is not None:
+                            return done
 
-                    msg_type = msg.get("type")
+                elif raw[0] == _DAT and rx.file_name:
+                    self._on_data(raw, rx)
 
-                    if msg_type == "relay_meta":
-                        raw_name     = msg["name"]
-                        file_size    = msg["size"]
-                        file_hash    = msg["sha256"]
-                        chunk_size   = msg.get("chunk_size", VPS_CHUNK_SIZE)
-                        total_chunks = msg.get("total_chunks", 0)
-                        transfer_id  = msg.get("transfer_id", "")
-
-                        # ── Security: sanitize file name (path traversal) ─
-                        file_name = _safe_file_name(raw_name)
-                        if file_name is None:
-                            self._emit("relay_unsafe_filename")
-                            return None
-                        # Defense-in-depth: verify resolved path stays in save_dir
-                        _resolved = (self._save_dir / file_name).resolve()
-                        if not str(_resolved).startswith(
-                            str(self._save_dir.resolve())
-                        ):
-                            self._emit("relay_path_traversal")
-                            return None
-
-                        # ── Security: validate file size ──────────────────
-                        if not isinstance(file_size, int) or file_size <= 0:
-                            self._emit("relay_invalid_filesize")
-                            return None
-                        if file_size > VPS_MAX_FILE_SIZE:
-                            self._emit("relay_file_too_large",
-                                       size=f"{file_size / (1024**3):.1f}",
-                                       limit=f"{VPS_MAX_FILE_SIZE / (1024**3):.0f}")
-                            return None
-
-                        # ── Security: validate chunk_size / total_chunks ──
-                        if not isinstance(chunk_size, int) or chunk_size <= 0:
-                            chunk_size = VPS_CHUNK_SIZE
-                        if chunk_size > 4 * 1024 * 1024:  # max 4 MB
-                            chunk_size = VPS_CHUNK_SIZE
-                        expected_chunks = (file_size + chunk_size - 1) // chunk_size
-                        if total_chunks != expected_chunks:
-                            log.warning(
-                                "total_chunks mismatch: got %d, expected %d",
-                                total_chunks, expected_chunks,
-                            )
-                            total_chunks = expected_chunks
-
-                        save_path = self._save_dir / file_name
-                        temp_path = save_path.with_suffix(save_path.suffix + ".part")
-
-                        # ── Resume detection ──────────────────────
-                        manifest = None
-                        if transfer_id:
-                            manifest = _load_manifest(
-                                self._save_dir, file_name, transfer_id
-                            )
-
-                        if (
-                            manifest
-                            and temp_path.exists()
-                            and manifest.get("chunk_size") == chunk_size
-                            and manifest.get("total_chunks") == total_chunks
-                        ):
-                            is_resume = True
-                            received_seqs = manifest["received_chunks"]
-                            bytes_received = len(received_seqs) * chunk_size
-                            if total_chunks - 1 in received_seqs:
-                                last_sz = file_size - (total_chunks - 1) * chunk_size
-                                bytes_received = bytes_received - chunk_size + last_sz
-                            bytes_received = min(bytes_received, file_size)
-
-                            try:
-                                out_file = open(temp_path, "r+b")
-                            except Exception as exc:
-                                self._emit("relay_part_open_error", error=str(exc))
-                                is_resume = False
-                                received_seqs = set()
-                                bytes_received = 0
-
-                            if is_resume:
-                                self._emit("relay_resume_found",
-                                           received=len(received_seqs), total=total_chunks,
-                                           mb=f"{bytes_received / (1024**2):.1f}")
-
-                        if not is_resume:
-                            received_seqs = set()
-                            bytes_received = 0
-                            try:
-                                out_file = open(temp_path, "w+b")
-                                if file_size > 0:
-                                    out_file.seek(file_size - 1)
-                                    out_file.write(b"\x00")
-                                    out_file.flush()
-                                    out_file.seek(0)
-                            except Exception as exc:
-                                self._emit("relay_file_create_error", error=str(exc))
-                                return None
-
-                        writer_thread = threading.Thread(
-                            target=_writer, daemon=True, name="vps-relay-writer"
-                        )
-                        writer_thread.start()
-
-                        size_str = human_size(file_size)
-                        if is_resume:
-                            pct = bytes_received / file_size * 100 if file_size else 0
-                            self._emit("relay_receiving_resume",
-                                       filename=file_name, size=size_str, pct=f"{pct:.0f}")
-                        else:
-                            self._emit("relay_receiving", filename=file_name, size=size_str)
-
-                        ack_msg: dict = {"type": "relay_meta_ack"}
-                        if is_resume and received_seqs:
-                            ack_msg["resume"] = True
-                            ack_msg["received_chunks"] = sorted(received_seqs)
-
-                        self._send_ctl(json.dumps(ack_msg).encode())
-                        t0 = time.monotonic()
-                        last_prog = t0
-
-                        if self.on_progress and is_resume:
-                            self.on_progress(bytes_received, file_size, 0)
-
-                    elif msg_type == "relay_done":
-                        announced = msg.get("total_chunks", total_chunks)
-                        if announced != total_chunks:
-                            # total_chunks was validated against file_size in relay_meta
-                            log.warning("relay_done total_chunks %r ignored (expected %d)",
-                                        announced, total_chunks)
-                        file_hash    = msg.get("sha256", file_hash)
-
-                        missing = sorted(set(range(total_chunks)) - received_seqs)
-
-                        if missing:
-                            if file_name and transfer_id:
-                                _save_manifest(
-                                    _manifest_path(self._save_dir, file_name),
-                                    transfer_id, file_name, file_size,
-                                    file_hash, chunk_size, total_chunks,
-                                    received_seqs,
-                                )
-                            BATCH = 1000
-                            for i in range(0, len(missing), BATCH):
-                                batch = missing[i: i + BATCH]
-                                self._send_ctl(json.dumps({
-                                    "type":    "relay_retransmit",
-                                    "missing": batch,
-                                }).encode())
-                            self._emit("relay_request_retransmit", count=len(missing))
-
-                        else:
-                            write_queue.put(None)
-                            write_queue.join()
-                            if writer_thread:
-                                writer_thread.join(timeout=30)
-
-                            try:
-                                out_file.close()
-                            except Exception:
-                                pass
-
-                            self._emit("relay_verifying_sha")
-                            verified = _sha256_file(temp_path) == file_hash
-
-                            self._send_ctl(json.dumps({
-                                "type":     "relay_done_ack",
-                                "verified": verified,
-                            }).encode())
-                            time.sleep(1)
-
-                            if verified:
-                                _delete_manifest(self._save_dir, file_name)
-                                final_path = _unique_path(save_path)
-                                if final_path != save_path:
-                                    self._emit("relay_file_renamed", filename=final_path.name)
-                                    save_path = final_path
-                                temp_path.rename(save_path)
-                                elapsed = time.monotonic() - t0
-                                avg = file_size / elapsed if elapsed > 0 else 0
-                                self._emit("relay_saved",
-                                           filename=save_path.name, speed=f"{avg / (1024*1024):.1f}")
-                                return save_path
-                            else:
-                                self._emit("relay_hash_mismatch_recv")
-                                _delete_manifest(self._save_dir, file_name)
-                                temp_path.unlink(missing_ok=True)
-                                return None
-
-                # ── Data frame ─────────────────────────────────────
-                elif msg_type == _DAT and file_name:
-                    if len(raw) < 5:
-                        continue
-                    seq      = struct.unpack_from("!I", raw, 1)[0]
-                    enc_data = raw[5:]
-
-                    if seq not in received_seqs:
-                        try:
-                            chunk = _decompress(self._crypto.decrypt(enc_data))
-                            received_seqs.add(seq)
-                            bytes_received += len(chunk)
-                            chunks_since_save += 1
-                            try:
-                                write_queue.put_nowait((seq, chunk))
-                            except queue.Full:
-                                received_seqs.discard(seq)
-                                bytes_received -= len(chunk)
-                                chunks_since_save -= 1
-                        except Exception:
-                            pass
-
-                    if (
-                        chunks_since_save >= RESUME_SAVE_INTERVAL
-                        and file_name and transfer_id
-                    ):
-                        _save_manifest(
-                            _manifest_path(self._save_dir, file_name),
-                            transfer_id, file_name, file_size,
-                            file_hash, chunk_size, total_chunks,
-                            received_seqs,
-                        )
-                        chunks_since_save = 0
-
-                    now = time.monotonic()
-                    if self.on_progress and file_size and (now - last_prog >= 0.5):
-                        elapsed = now - t0
-                        self.on_progress(
-                            bytes_received, file_size,
-                            bytes_received / elapsed if elapsed > 0 else 0,
-                        )
-                        last_prog = now
+            return _Attempt.FATAL, None        # cancelled
 
         except Exception as exc:
             self._emit("transfer_error_generic", error=str(exc))
             log.exception("VPSRelayReceiver error")
-            if file_name and received_seqs:
-                self._retryable = True
+            retry = rx.file_name and rx.received
+            return (_Attempt.RETRY if retry else _Attempt.FATAL), None
         finally:
-            try:
-                write_queue.put(None)
-            except Exception:
-                pass
-            if writer_thread and writer_thread.is_alive():
-                writer_thread.join(timeout=10)
-            if out_file:
-                try:
-                    out_file.close()
-                except Exception:
-                    pass
-
+            if rx.writer:
+                rx.writer.close()
             # Save resume manifest on interruption
-            if (
-                file_name and transfer_id and received_seqs
-                and len(received_seqs) < total_chunks
-            ):
-                self._emit("relay_progress_saved",
-                           received=len(received_seqs), total=total_chunks)
-                _save_manifest(
-                    _manifest_path(self._save_dir, file_name),
-                    transfer_id, file_name, file_size,
-                    file_hash, chunk_size, total_chunks,
-                    received_seqs,
-                )
+            if rx.file_name and rx.transfer_id and rx.received and len(rx.received) < rx.total_chunks:
+                self._emit("relay_progress_saved", received=len(rx.received), total=rx.total_chunks)
+                rx.save_manifest(self._save_dir)
 
-        return None
+    # ── relay_meta: validate, open .part (resume if possible), ACK ──
+
+    def _on_meta(self, msg: dict, rx: "_Incoming") -> bool:
+        """Returns False if the announced file must be refused."""
+        file_size    = msg["size"]
+        chunk_size   = msg.get("chunk_size", VPS_CHUNK_SIZE)
+        total_chunks = msg.get("total_chunks", 0)
+
+        # ── Security: sanitize file name (path traversal) ─
+        file_name = _safe_file_name(msg["name"])
+        if file_name is None:
+            self._emit("relay_unsafe_filename")
+            return False
+        # Defense-in-depth: verify resolved path stays in save_dir
+        resolved = (self._save_dir / file_name).resolve()
+        if not str(resolved).startswith(str(self._save_dir.resolve())):
+            self._emit("relay_path_traversal")
+            return False
+
+        # ── Security: validate file size ──────────────────
+        if not isinstance(file_size, int) or file_size <= 0:
+            self._emit("relay_invalid_filesize")
+            return False
+        if file_size > VPS_MAX_FILE_SIZE:
+            self._emit("relay_file_too_large",
+                       size=f"{file_size / (1024**3):.1f}",
+                       limit=f"{VPS_MAX_FILE_SIZE / (1024**3):.0f}")
+            return False
+
+        # ── Security: validate chunk_size / total_chunks ──
+        if not isinstance(chunk_size, int) or chunk_size <= 0 or chunk_size > 4 * 1024 * 1024:
+            chunk_size = VPS_CHUNK_SIZE
+        expected_chunks = (file_size + chunk_size - 1) // chunk_size
+        if total_chunks != expected_chunks:
+            log.warning("total_chunks mismatch: got %r, expected %d", total_chunks, expected_chunks)
+            total_chunks = expected_chunks
+
+        rx.file_name    = file_name
+        rx.file_size    = file_size
+        rx.file_hash    = msg["sha256"]
+        rx.transfer_id  = msg.get("transfer_id", "")
+        rx.chunk_size   = chunk_size
+        rx.total_chunks = total_chunks
+        rx.save_path    = self._save_dir / file_name
+        rx.temp_path    = rx.save_path.with_suffix(rx.save_path.suffix + ".part")
+
+        # ── Resume detection ──────────────────────
+        is_resume = False
+        manifest = _load_manifest(self._save_dir, file_name, rx.transfer_id) if rx.transfer_id else None
+        if (
+            manifest
+            and rx.temp_path.exists()
+            and manifest.get("chunk_size") == chunk_size
+            and manifest.get("total_chunks") == total_chunks
+        ):
+            try:
+                rx.writer = _DiskWriter(rx.temp_path, chunk_size, resume=True)
+                is_resume = True
+            except Exception as exc:
+                self._emit("relay_part_open_error", error=str(exc))
+        if is_resume:
+            rx.received = manifest["received_chunks"]
+            rx.bytes_received = rx.resumed_bytes()
+            self._emit("relay_resume_found",
+                       received=len(rx.received), total=total_chunks,
+                       mb=f"{rx.bytes_received / (1024**2):.1f}")
+        else:
+            rx.received = set()
+            rx.bytes_received = 0
+            try:
+                rx.writer = _DiskWriter(rx.temp_path, chunk_size, resume=False, size=file_size)
+            except Exception as exc:
+                self._emit("relay_file_create_error", error=str(exc))
+                return False
+
+        size_str = human_size(file_size)
+        if is_resume:
+            pct = rx.bytes_received / file_size * 100 if file_size else 0
+            self._emit("relay_receiving_resume", filename=file_name, size=size_str, pct=f"{pct:.0f}")
+        else:
+            self._emit("relay_receiving", filename=file_name, size=size_str)
+
+        ack: dict = {"type": "relay_meta_ack"}
+        if is_resume and rx.received:
+            ack["resume"] = True
+            ack["received_chunks"] = sorted(rx.received)
+        self._send_ctl(json.dumps(ack).encode())
+        rx.t0 = rx.last_progress = time.monotonic()
+
+        if self.on_progress and is_resume:
+            self.on_progress(rx.bytes_received, file_size, 0)
+        return True
+
+    # ── relay_done: request missing chunks, or verify and save ──────
+
+    def _on_done(self, msg: dict, rx: "_Incoming") -> Optional[tuple[_Attempt, Optional[Path]]]:
+        """Returns the attempt's result once finished, None to keep receiving."""
+        announced = msg.get("total_chunks", rx.total_chunks)
+        if announced != rx.total_chunks:
+            # total_chunks was validated against file_size in relay_meta
+            log.warning("relay_done total_chunks %r ignored (expected %d)", announced, rx.total_chunks)
+        rx.file_hash = msg.get("sha256", rx.file_hash)
+
+        missing = sorted(set(range(rx.total_chunks)) - rx.received)
+        if missing:
+            if rx.file_name and rx.transfer_id:
+                rx.save_manifest(self._save_dir)
+            for i in range(0, len(missing), 1000):
+                self._send_ctl(json.dumps({"type": "relay_retransmit", "missing": missing[i:i + 1000]}).encode())
+            self._emit("relay_request_retransmit", count=len(missing))
+            return None
+
+        rx.writer.finish()
+        self._emit("relay_verifying_sha")
+        verified = _sha256_file(rx.temp_path) == rx.file_hash
+        self._send_ctl(json.dumps({"type": "relay_done_ack", "verified": verified}).encode())
+        time.sleep(1)
+
+        _delete_manifest(self._save_dir, rx.file_name)
+        if not verified:
+            self._emit("relay_hash_mismatch_recv")
+            rx.temp_path.unlink(missing_ok=True)
+            return _Attempt.FATAL, None
+
+        save_path = _unique_path(rx.save_path)
+        if save_path != rx.save_path:
+            self._emit("relay_file_renamed", filename=save_path.name)
+        rx.temp_path.rename(save_path)
+        elapsed = time.monotonic() - rx.t0
+        avg = rx.file_size / elapsed if elapsed > 0 else 0
+        self._emit("relay_saved", filename=save_path.name, speed=f"{avg / (1024*1024):.1f}")
+        return _Attempt.SUCCESS, save_path
+
+    # ── data frame: decrypt, queue for disk, persist progress ───────
+
+    def _on_data(self, raw: bytes, rx: "_Incoming") -> None:
+        if len(raw) < 5:
+            return
+        seq = struct.unpack_from("!I", raw, 1)[0]
+        if seq not in rx.received:
+            try:
+                chunk = _decompress(self._crypto.decrypt(raw[5:]))
+            except Exception:
+                chunk = None
+            # A full write queue drops the chunk; it is re-requested later
+            if chunk is not None and rx.writer.put(seq, chunk):
+                rx.received.add(seq)
+                rx.bytes_received += len(chunk)
+                rx.chunks_since_save += 1
+
+        if rx.chunks_since_save >= RESUME_SAVE_INTERVAL and rx.transfer_id:
+            rx.save_manifest(self._save_dir)
+            rx.chunks_since_save = 0
+
+        now = time.monotonic()
+        if self.on_progress and rx.file_size and now - rx.last_progress >= 0.5:
+            elapsed = now - rx.t0
+            self.on_progress(rx.bytes_received, rx.file_size,
+                             rx.bytes_received / elapsed if elapsed > 0 else 0)
+            rx.last_progress = now
 
     # ── Send helper ────────────────────────────────────────────────
 
@@ -1422,9 +1241,115 @@ class VPSRelayReceiver(_RelayPeer):
         except Exception as exc:
             log.debug("VPS recv-side send ctl: %s", exc)
 
-    def _close(self) -> None:
+
+# ════════════════════════════════════════════════════════════════════
+#  Receiver helpers
+# ════════════════════════════════════════════════════════════════════
+
+@dataclass
+class _Incoming:
+    """State of the file being received during one attempt."""
+    file_name:         Optional[str]  = None
+    file_size:         int            = 0
+    file_hash:         str            = ""
+    transfer_id:       str            = ""
+    chunk_size:        int            = VPS_CHUNK_SIZE
+    total_chunks:      int            = 0
+    received:          set            = field(default_factory=set)
+    bytes_received:    int            = 0
+    chunks_since_save: int            = 0
+    save_path:         Optional[Path] = None
+    temp_path:         Optional[Path] = None
+    writer:            Optional["_DiskWriter"] = None
+    t0:                float          = field(default_factory=time.monotonic)
+    last_progress:     float          = field(default_factory=time.monotonic)
+
+    def resumed_bytes(self) -> int:
+        """Bytes already on disk according to the resume manifest."""
+        done = len(self.received) * self.chunk_size
+        if self.total_chunks - 1 in self.received:
+            last = self.file_size - (self.total_chunks - 1) * self.chunk_size
+            done = done - self.chunk_size + last
+        return min(done, self.file_size)
+
+    def save_manifest(self, save_dir: Path) -> None:
+        _save_manifest(
+            _manifest_path(save_dir, self.file_name),
+            self.transfer_id, self.file_name, self.file_size,
+            self.file_hash, self.chunk_size, self.total_chunks,
+            self.received,
+        )
+
+
+class _DiskWriter:
+    """Writes received chunks to the .part file on a background thread,
+    so disk I/O never stalls the network loop."""
+
+    def __init__(self, path: Path, chunk_size: int, resume: bool, size: int = 0) -> None:
+        if resume:
+            self._file = open(path, "r+b")
+        else:
+            self._file = open(path, "w+b")
+            if size > 0:                      # pre-allocate
+                self._file.seek(size - 1)
+                self._file.write(b"\x00")
+                self._file.flush()
+                self._file.seek(0)
+        self._chunk_size = chunk_size
+        self._queue: queue.Queue = queue.Queue(maxsize=512)
+        self._thread = threading.Thread(target=self._run, daemon=True, name="vps-relay-writer")
+        self._thread.start()
+
+    def put(self, seq: int, data: bytes) -> bool:
+        """Queue a chunk; False if the queue is full (chunk dropped)."""
         try:
-            if self._ws:
-                self._ws.close()
+            self._queue.put_nowait((seq, data))
+            return True
+        except queue.Full:
+            return False
+
+    def finish(self) -> None:
+        """Write everything queued so far and close the file."""
+        self._queue.put(None)
+        self._queue.join()
+        self._thread.join(timeout=30)
+        self._close_file()
+
+    def close(self) -> None:
+        """Stop the writer (idempotent; used on every exit path)."""
+        if self._thread.is_alive():
+            try:
+                self._queue.put(None, timeout=5)
+            except queue.Full:
+                pass
+            self._thread.join(timeout=10)
+        self._close_file()
+
+    def _run(self) -> None:
+        writes = 0
+        while True:
+            item = self._queue.get()
+            if item is None:
+                try:
+                    if not self._file.closed:
+                        self._file.flush()
+                except Exception:
+                    pass
+                self._queue.task_done()
+                return
+            seq, data = item
+            try:
+                self._file.seek(seq * self._chunk_size)
+                self._file.write(data)
+                writes += 1
+                if writes % 128 == 0:
+                    self._file.flush()
+            except Exception:
+                pass
+            self._queue.task_done()
+
+    def _close_file(self) -> None:
+        try:
+            self._file.close()
         except Exception:
             pass
