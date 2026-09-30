@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import threading
 
 import pytest
@@ -67,8 +68,26 @@ def test_path_components_are_stripped(relay, inbox, tmp_path, name, expected):
     s.peer.send_ctl({"type": "relay_done", "sha256": hashlib.sha256(data).hexdigest(), "total_chunks": 1})
     assert s.peer.recv_ctl() == {"type": "relay_done_ack", "verified": True}
     saved = s.finish()
-    assert saved == inbox / expected
-    assert [p.name for p in tmp_path.rglob("evil.txt")] == [expected]
+    # Security property on every OS: the file lands directly inside the inbox.
+    assert saved is not None and saved.parent == inbox
+    outside = [p for p in tmp_path.rglob("*evil.txt") if p.parent != inbox]
+    assert outside == []
+    if sys.platform == "win32" or "\\" not in name:
+        assert saved == inbox / expected
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows already treats backslash as a separator")
+@pytest.mark.xfail(strict=True, reason="B11: on Linux/macOS backslashes in the sender's name are kept literally")
+@pytest.mark.parametrize("name", ["..\\..\\evil.txt", "C:\\Windows\\evil.txt"], ids=["win-dotdot", "win-absolute"])
+def test_windows_separators_are_normalised_on_posix(relay, inbox, name):
+    data = b"payload"
+    s = Session(relay, inbox)
+    s.peer.send_ctl(meta(name=name, size=len(data), sha=hashlib.sha256(data).hexdigest()))
+    s.peer.recv_ctl()
+    s.peer.send_chunk(0, data)
+    s.peer.send_ctl({"type": "relay_done", "sha256": hashlib.sha256(data).hexdigest(), "total_chunks": 1})
+    s.peer.recv_ctl()
+    assert s.finish() == inbox / "evil.txt"
 
 
 @pytest.mark.parametrize("name", ["..", ".", "", "bad\x00name"], ids=["dotdot", "dot", "empty", "nul"])
