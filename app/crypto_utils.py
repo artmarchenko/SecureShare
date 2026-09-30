@@ -5,7 +5,6 @@ X25519 key exchange + AES-256-GCM for end-to-end encryption.
 
 Security features (v2):
   - Signaling encryption: pre-shared key derived from session code
-  - Topic hashing: MQTT topics are opaque hashes (prevents session discovery)
   - Nonce-prefix: each peer uses a distinct prefix (prevents nonce collision)
   - AAD: session code is bound as Associated Data in AES-GCM
 """
@@ -32,7 +31,7 @@ def derive_signaling_key(session_code: str) -> bytes:
     """Derive AES-256 key from session code for encrypting signaling payloads.
 
     Both peers know the session code (shared out-of-band), so both can derive
-    the same key.  An eavesdropper on the MQTT broker who does NOT know the
+    the same key.  Someone observing the relay traffic who does NOT know the
     code cannot decrypt signaling messages.
     """
     return HKDF(
@@ -41,19 +40,6 @@ def derive_signaling_key(session_code: str) -> bytes:
         salt=b"secureshare-signaling-salt-v2",
         info=b"secureshare-signaling-key",
     ).derive(session_code.encode("utf-8"))
-
-
-def derive_topic_id(session_code: str) -> str:
-    """Derive an opaque 16-hex-char topic component from the session code.
-
-    This prevents session discovery via MQTT wildcard subscriptions —
-    an observer sees random-looking topic names instead of session codes.
-    """
-    return hmac.new(
-        session_code.encode("utf-8"),
-        b"secureshare-topic-v2",
-        hashlib.sha256,
-    ).hexdigest()[:16]
 
 
 def signaling_encrypt(key: bytes, plaintext: bytes) -> bytes:
@@ -143,6 +129,12 @@ class CryptoSession:
         my_pub = self.get_public_key_bytes()
         self._nonce_prefix = 0 if my_pub < peer_public_key_bytes else 1
 
+    def mac(self, data: bytes) -> bytes:
+        """HMAC-SHA256 of `data` keyed with the session's shared key."""
+        if not self._shared_key:
+            raise ValueError("Call derive_shared_key first")
+        return hmac.new(self._shared_key, data, hashlib.sha256).digest()
+
     def get_verification_code(self) -> str:
         """Short code both users can compare to confirm no MITM."""
         if not self._shared_key:
@@ -179,15 +171,3 @@ class CryptoSession:
         nonce = data[: self.NONCE_LEN]
         ciphertext = data[self.NONCE_LEN :]
         return self._aes.decrypt(nonce, ciphertext, self._aad)
-
-    # ── Wire helpers ───────────────────────────────────────────────
-
-    @staticmethod
-    def encrypt_chunk_header(length: int) -> bytes:
-        """Pack a 4-byte big-endian length prefix."""
-        return struct.pack("!I", length)
-
-    @staticmethod
-    def read_length_prefix(data: bytes) -> int:
-        """Unpack a 4-byte big-endian length prefix."""
-        return struct.unpack("!I", data[:4])[0]

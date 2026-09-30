@@ -38,6 +38,7 @@ from .config import (
     VPS_MAX_FILE_SIZE,
     VPS_RELAY_URL,
 )
+from .format import human_eta, human_size, human_speed
 from .ws_relay import VPSRelaySender, VPSRelayReceiver
 from .updater import (
     check_for_update, skip_version, clear_skipped, ReleaseInfo,
@@ -78,30 +79,6 @@ def _generate_code() -> str:
     chars = string.ascii_lowercase + string.digits
     code = "".join(secrets.choice(chars) for _ in range(SESSION_CODE_LENGTH))
     return f"{code[:4]}-{code[4:]}"
-
-
-def _human_size(b: int | float) -> str:
-    for key in ("unit_b", "unit_kb", "unit_mb", "unit_gb", "unit_tb"):
-        if abs(b) < 1024:
-            return f"{b:.1f} {t(key)}"
-        b /= 1024
-    return f"{b:.1f} {t('unit_pb')}"
-
-
-def _human_speed(bps: float) -> str:
-    return f"{_human_size(bps)}{t('speed_suffix')}"
-
-
-def _human_eta(seconds: float) -> str:
-    if seconds < 0 or seconds > 360000:
-        return "—"
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    if h:
-        return t("eta_hours", h=h, m=m)
-    if m:
-        return t("eta_minutes", m=m, s=s)
-    return t("eta_seconds", s=s)
 
 
 def _timestamp() -> str:
@@ -623,11 +600,11 @@ class App(ctk.CTk):
             size = Path(path).stat().st_size
             name = Path(path).name
             self.file_info_label.configure(
-                text=f"📄 {name} — {_human_size(size)}"
+                text=f"📄 {name} — {human_size(size)}"
             )
             if size > VPS_MAX_FILE_SIZE:
                 self.size_warning_label.configure(
-                    text=t("file_size_warning", max_size=_human_size(VPS_MAX_FILE_SIZE))
+                    text=t("file_size_warning", max_size=human_size(VPS_MAX_FILE_SIZE))
                 )
             else:
                 self.size_warning_label.configure(text="")
@@ -1483,8 +1460,8 @@ class App(ctk.CTk):
             eta = (total - done) / speed if speed > 0 else 0
             self.progress_label.configure(
                 text=(
-                    f"{pct:.1f}%  ·  {_human_size(done)} / {_human_size(total)}"
-                    f"  ·  ⚡ {_human_speed(speed)}  ·  ⏱ {_human_eta(eta)}"
+                    f"{pct:.1f}%  ·  {human_size(done)} / {human_size(total)}"
+                    f"  ·  ⚡ {human_speed(speed)}  ·  ⏱ {human_eta(eta)}"
                 )
             )
         self.after(0, _do)
@@ -1664,8 +1641,8 @@ class App(ctk.CTk):
             proceed = messagebox.askyesno(
                 t("msgbox_large_file_title"),
                 t("msgbox_large_file_body",
-                  file_size=_human_size(file_size),
-                  max_size=_human_size(VPS_MAX_FILE_SIZE)),
+                  file_size=human_size(file_size),
+                  max_size=human_size(VPS_MAX_FILE_SIZE)),
             )
             if not proceed:
                 return
