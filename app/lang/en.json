@@ -115,6 +115,9 @@
   "diag_tls_error": "Error: {error}",
   "diag_ws_fail": "Could not connect",
   "diag_latency_fail": "Could not measure",
+  "diag_privacy_title": "Privacy",
+  "diag_crash_reports": "Send anonymous crash reports",
+  "diag_usage_stats": "Send anonymous transfer statistics",
   "diag_quality_excellent": "Excellent",
   "diag_quality_good": "Good",
   "diag_quality_slow": "Slow",
@@ -159,6 +162,7 @@
   "verify_title": "🔐 Connection verification",
   "verify_prompt": "Make sure both participants\nsee the same code:",
   "verify_warning": "⚠ If codes differ — the connection may be\nintercepted by an attacker (MITM)!",
+  "verify_timeout": "❌ Verification timed out — connection cancelled",
 
   "copyright": "© 2026 Artem Marchenko. All rights reserved.",
 
@@ -221,6 +225,7 @@
   "relay_request_retransmit": "🔄 Requesting retransmission of {count} chunks...",
   "relay_verifying_sha": "🔍 Verifying SHA-256...",
   "relay_saved": "✅ Saved: {filename} ({speed} MB/s)",
+  "relay_file_renamed": "📝 A file with this name already exists — saving as {filename}",
   "relay_hash_mismatch_recv": "❌ Hash mismatch!",
   "relay_progress_saved": "💾 Progress saved: {received}/{total} chunks — can be resumed",
 
