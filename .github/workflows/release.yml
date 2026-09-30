@@ -53,6 +53,10 @@ jobs:
         run: |
           flake8 app/ main.py build.py
           flake8 server/relay_server.py
+          flake8 scripts/
+
+      - name: Regression guard (versions, i18n, server invariants)
+        run: python scripts/regression_guard.py
 
       - name: Import check
         run: |
