@@ -61,18 +61,42 @@ def test_language_choice_survives_restart(app, dialogs, no_update_check):
         i18n.set_language("uk")
 
 
-@pytest.mark.parametrize("size", ["default", "minimum"])
-def test_footer_and_status_fully_visible(app, size):
-    # U1: at the default size (and at the minimum size) nothing at the bottom is clipped
+def _fully_inside(widget, container) -> bool:
+    """Mapped, not squashed by the geometry manager, and within `container`."""
+    top = widget.winfo_rooty()
+    return (widget.winfo_ismapped()
+            and widget.winfo_height() >= widget.winfo_reqheight() - 1
+            and top >= container.winfo_rooty()
+            and top + widget.winfo_height() <= container.winfo_rooty() + container.winfo_height())
+
+
+@pytest.mark.parametrize("size", ["default", "minimum", "tall"])
+def test_nothing_important_is_clipped(app, size):
+    # U1 (+ regression found via screenshots): at every window size the main
+    # buttons stay fully inside their tab and the bottom row + footer stay
+    # inside the window; only the scrollable log box may shrink.
+    import tkinter
     if size == "minimum":
-        import tkinter
-        w, h = tkinter.Tk.wm_minsize(app)   # CTk.minsize() getter is broken; ask Tk (physical px)
+        w, h = tkinter.Tk.wm_minsize(app)   # CTk.minsize() getter is broken; ask Tk
         app.geometry(f"{w}x{h}")
+    elif size == "tall":
+        app.geometry("580x900")
+    for tab_name, button in ((app._tab_send_name, app.send_btn), (app._tab_recv_name, app.recv_btn)):
+        app.tabs.set(tab_name)
+        pump(app, timeout=0.4)
+        for container in (app.tabs.tab(tab_name), app.tabs, app):
+            assert _fully_inside(button, container), f"{button.cget('text')} clipped by {container} ({size})"
+    for widget in (app.cancel_btn, app._copy_log_btn, app._copyright_lbl):
+        assert _fully_inside(widget, app), f"{widget} clipped ({size})"
+    assert app.status_box.winfo_height() >= 30
+
+
+def test_log_box_takes_extra_height(app):
+    pump(app, timeout=0.3)
+    before = app.status_box.winfo_height()
+    app.geometry("580x900")
     pump(app, timeout=0.4)
-    for widget in (app._copyright_lbl, app.cancel_btn):
-        assert widget.winfo_ismapped()
-        bottom = widget.winfo_rooty() + widget.winfo_height()
-        assert bottom <= app.winfo_rooty() + app.winfo_height(), f"{widget} is clipped"
+    assert app.status_box.winfo_height() > before + 100
 
 
 def test_copy_log_puts_text_on_clipboard(app):

@@ -275,7 +275,9 @@ class App(ctk.CTk):
 
         # Tab view
         self.tabs = ctk.CTkTabview(self, width=self.WIDTH - 40)
-        self.tabs.pack(fill="both", expand=True, padx=20, pady=(6, 0))
+        # The tabs keep their natural height; spare (or missing) vertical space
+        # goes to the status log below, which scrolls anyway (U1).
+        self.tabs.pack(fill="x", padx=20, pady=(6, 0))
 
         self._tab_send_name = t("tab_send")
         self._tab_recv_name = t("tab_receive")
@@ -284,9 +286,7 @@ class App(ctk.CTk):
 
         # ── Status / progress area (shared) ───────────────────────
         status_frame = ctk.CTkFrame(self)
-        # Bottom-anchored and packed before the tabs, so when the window is
-        # short the tab area shrinks instead of the status area/footer (U1).
-        status_frame.pack(side="bottom", fill="x", padx=20, pady=(4, 6), before=self.tabs)
+        status_frame.pack(fill="both", expand=True, padx=20, pady=(4, 6))
 
         # Connection status indicator
         self.status_indicator = ctk.CTkLabel(
@@ -317,11 +317,13 @@ class App(ctk.CTk):
             state="disabled",
             wrap="word",
         )
-        self.status_box.pack(fill="x", padx=12, pady=(2, 4))
+        self.status_box.pack(fill="both", expand=True, padx=12, pady=(2, 4))
 
         # Bottom buttons row: log actions + cancel
         btn_row = ctk.CTkFrame(status_frame, fg_color="transparent")
-        btn_row.pack(fill="x", padx=12, pady=(0, 8))
+        # Packed at the bottom *before* the log box: if space runs out, the
+        # log box shrinks, never the buttons.
+        btn_row.pack(side="bottom", fill="x", padx=12, pady=(0, 8), before=self.status_box)
 
         self._copy_log_btn = ctk.CTkButton(
             btn_row,
@@ -371,7 +373,9 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=10),
             text_color="gray",
         )
-        self._copyright_lbl.pack(side="bottom", pady=(0, 4), before=status_frame)
+        # Bottom-anchored and allocated before the tabs/status area, so it is
+        # never the widget that gets clipped.
+        self._copyright_lbl.pack(side="bottom", pady=(0, 4), before=self.tabs)
 
     def _on_language_change(self, label: str):
         """Handle language selection from the toolbar dropdown."""
