@@ -185,6 +185,8 @@
   "relay_key_message_error": "❌ Ungültige Schlüsselaustauschnachricht",
   "relay_protocol_info": "🔗 Protokoll: v{our_proto} ↔ v{peer_proto} (App {our_app} ↔ {peer_app})",
   "relay_incompatible": "❌ Inkompatible Partnerversion (Protokoll v{peer_proto}, benötigt v{min_proto}+). Bitte den Partner, die App zu aktualisieren.",
+  "relay_commit_mismatch": "❌ Der Schlüssel des Partners passt nicht zu seiner Zusage — möglicher Man-in-the-Middle-Angriff. Verbindung getrennt.",
+  "relay_peer_version_hint": "ℹ️ Falls der Partner sich nicht verbindet: Er braucht SecureShare 4.0 oder neuer (ältere Versionen verbinden sich nicht mit 4.x).",
   "relay_peer_newer": "⚠️ Partner hat eine neuere Version (v{peer_app}). Wir empfehlen ein Update.",
 
   "relay_auto_verify": "🔄 Auto-Verifizierung (Wiederverbindung)",

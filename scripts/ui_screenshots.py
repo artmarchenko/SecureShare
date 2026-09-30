@@ -119,7 +119,7 @@ def main() -> int:
 
         # Verification dialog
         answer: list = []
-        worker = threading.Thread(target=lambda: answer.append(app._verify_connection("E555-EB8B")), daemon=True)
+        worker = threading.Thread(target=lambda: answer.append(app._verify_connection("K7PQ-2XMA")), daemon=True)
         worker.start()
 
         def find_dialog():

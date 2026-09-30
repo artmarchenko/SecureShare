@@ -7,36 +7,31 @@ Both sender and receiver connect to the same VPS relay server:
 The server pairs clients by session code and pipes raw bytes.
 All data is E2E encrypted — the server never inspects content.
 
-Protocol phases:
-  1. Key Exchange + Version Negotiation (signaling-encrypted)
-     Both sides send X25519 public key + protocol_version + app_version.
-     Optionally includes reconnect_token for auto-reconnect.
-     If versions are incompatible → clear error message → abort.
-  2. Verification (signaling-encrypted)
-     Both sides confirm verification code matches (user interaction).
-     On auto-reconnect: skipped if reconnect_token matches.
-  3. File Transfer (E2E encrypted with derived key)
+Protocol phases (protocol v2):
+  0. Room: both sides send the relay a room ID derived from the session code
+     (scrypt + HKDF) — the relay never sees the code itself.
+  1. Key exchange, commit-then-reveal (signaling-encrypted):
+       sender   → commit = H(sender_pub ‖ opening)      (+ versions)
+       receiver → receiver_pub                         (+ versions)
+       sender   → sender_pub, opening   (receiver checks the commitment)
+     then both → session_proof: MAC under the previous session key over the
+     new public keys (empty on the first connection).
+  2. Verification: 8-char base32 code bound to both public keys, confirmed
+     by both users — or skipped on reconnect when the peer's session_proof
+     is valid.
+  3. File transfer (E2E, AES-256-GCM; AAD = room ‖ author role ‖ frame type
+     ‖ chunk number).
      Sender: metadata → chunks → done
      Receiver: meta_ack → done_ack (with SHA-256 result)
-
-     Resume support (v3.1):
-       After receiving relay_meta, the receiver checks for a matching
-       .resume manifest from a previous interrupted transfer.  If found,
-       relay_meta_ack includes resume=true + received_chunks list.
-       The sender then skips already-received chunks.
-
-     Auto-reconnect (v3.2):
-       On connection loss during transfer, both sides automatically
-       reconnect with the same session code, re-do key exchange,
-       skip verification (reconnect_token proves identity), and
-       resume the transfer.
+     Resume: relay_meta_ack may list chunks already on disk (.resume manifest).
+     Auto-reconnect: on connection loss both sides reconnect and continue.
 
 Wire format:
   [1 byte type][payload]
 
   'S' (0x53)  signaling : signaling_encrypt(JSON)
-  'C' (0x43)  control   : e2e_encrypt(JSON)
-  'D' (0x44)  data      : [4B seq BE] e2e_encrypt(compressed_chunk)
+  'C' (0x43)  control   : e2e_encrypt(JSON, aad="C")
+  'D' (0x44)  data      : [4B seq BE] e2e_encrypt(compressed_chunk, aad="D"+seq)
 
 Control message types (JSON field "type"):
   relay_meta        sender → receiver   file info (+ transfer_id)
@@ -50,7 +45,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import hmac
 import json
 import logging
 import queue
@@ -100,10 +94,14 @@ from .config import (
 from .i18n import t
 from .format import human_size
 from .crypto_utils import (
+    ROLE_RECEIVER,
+    ROLE_SENDER,
     CryptoSession,
-    derive_signaling_key,
-    signaling_encrypt,
+    SessionSecrets,
+    check_commitment,
+    make_commitment,
     signaling_decrypt,
+    signaling_encrypt,
 )
 
 
@@ -157,6 +155,7 @@ _STATE_FOR_MESSAGE: dict[str, TransferState] = {
     "relay_key_decrypt_error":   _S.ERROR,
     "relay_key_message_error":   _S.ERROR,
     "relay_incompatible":        _S.ERROR,
+    "relay_commit_mismatch":     _S.ERROR,
     "relay_auto_verify_error":   _S.ERROR,
     "relay_verify_rejected":     _S.ERROR,
     "relay_verify_error":        _S.ERROR,
@@ -194,6 +193,7 @@ class _RelayPeer:
     """
 
     _ROLE = "Peer"
+    _CRYPTO_ROLE = ""          # ROLE_SENDER / ROLE_RECEIVER
     _WAITING_KEY = ""          # status message shown while waiting for the peer
 
     def __init__(
@@ -213,7 +213,9 @@ class _RelayPeer:
         self._cancel_event = threading.Event()
         self._ws: Optional[websocket.WebSocket] = None
         self._crypto: Optional[CryptoSession] = None
-        self._reconnect_token: Optional[str] = None
+        self._secrets: Optional[SessionSecrets] = None
+        # last verified session: its key proves our identity on reconnect
+        self._previous: Optional[CryptoSession] = None
 
     # ── Public ────────────────────────────────────────────────────
 
@@ -281,11 +283,13 @@ class _RelayPeer:
         Returns None on success, otherwise how the attempt should end.
         """
         self._emit("relay_reconnecting_to" if is_reconnect else "relay_connecting_to")
+        if self._secrets is None:
+            self._secrets = SessionSecrets.from_code(self._code)   # scrypt: ~0.1 s, once
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(VPS_RELAY_URL, timeout=30)
-            self._ws.settimeout(300)       # 5 min to wait for the peer
-            self._ws.send(self._code)      # register session code
+            self._ws.settimeout(300)                  # 5 min to wait for the peer
+            self._ws.send(self._secrets.room_id)      # the relay never sees the code
         except Exception as exc:
             self._emit("relay_connect_error", error=str(exc))
             # DNS failures are transient — always allow retry
@@ -295,34 +299,23 @@ class _RelayPeer:
 
         self._emit(self._WAITING_KEY)
 
-        self._crypto, peer_token = _do_key_exchange(
-            self._ws, self._code, self._emit,
-            reconnect_token=self._reconnect_token,
+        self._crypto, fatal, proven = _do_key_exchange(
+            self._ws, self._secrets, self._CRYPTO_ROLE, self._emit, self._previous,
         )
         if not self._crypto:
-            return _Attempt.RETRY if is_reconnect else _Attempt.FATAL
+            return _Attempt.FATAL if fatal or not is_reconnect else _Attempt.RETRY
 
-        # Token for the *next* reconnect comes from this new key exchange
-        new_token = _make_reconnect_token(self._crypto, self._code)
-        sig_key = derive_signaling_key(self._code)
         self._ws.settimeout(120)
-
-        # Auto-verify on reconnect if the peer proved the previous session
-        # (timing-safe comparison to prevent side-channel leaks)
-        auto_verify = (
-            is_reconnect
-            and self._reconnect_token is not None
-            and peer_token is not None
-            and hmac.compare_digest(peer_token, self._reconnect_token)
-        )
+        # On reconnect the peer proved it holds the previous session's key
+        # (bound to the new public keys), so the code need not be re-checked.
         if not _do_verification(
-            self._ws, self._crypto, sig_key,
+            self._ws, self._crypto, self._secrets.signaling_key,
             self.on_verify, self._emit,
-            auto_verify=auto_verify,
+            auto_verify=proven,
         ):
             return _Attempt.FATAL          # verification rejected
 
-        self._reconnect_token = new_token
+        self._previous = self._crypto
         return None
 
     def _close(self) -> None:
@@ -368,20 +361,6 @@ def _make_transfer_id(name: str, size: int, sha256: str) -> str:
     """
     raw = f"{name}|{size}|{sha256}".encode()
     return hashlib.sha256(raw).hexdigest()[:32]
-
-
-# ── Reconnect token ──────────────────────────────────────────────
-
-def _make_reconnect_token(crypto: CryptoSession, session_code: str) -> str:
-    """Derive a reconnect token from the DH shared key.
-
-    Both peers compute the same token after key exchange.  On
-    reconnect, including this token in the key-exchange message
-    proves that the peer participated in the original session
-    → verification popup can be safely skipped.
-    """
-    raw = crypto.mac(session_code.encode() + b"secureshare-reconnect-v1")[:16]
-    return base64.b64encode(raw).decode()
 
 
 # ── Resume manifest helpers ───────────────────────────────────────
@@ -503,96 +482,138 @@ def _unique_path(path: Path) -> Path:
 
 # ── Key Exchange (common for sender and receiver) ─────────────────
 
-def _do_key_exchange(
-    ws,
-    session_code: str,
-    emit: EmitCB,
-    reconnect_token: Optional[str] = None,
-) -> tuple[Optional[CryptoSession], Optional[str]]:
-    """
-    Perform X25519 key exchange over the WebSocket with version negotiation.
+class _SignalingError(Exception):
+    """A signaling step failed; `key` is the status message to show."""
 
-    Both sides send their public key + protocol version simultaneously
-    (signaling-encrypted).  The VPS relay pipes A→B and B→A, so each
-    side receives the other's key.
+    def __init__(self, key: str, **fmt):
+        super().__init__(key)
+        self.key, self.fmt = key, fmt
 
-    If reconnect_token is provided, it is included in the signaling
-    message so the peer can verify the reconnect without a popup.
 
-    Returns (CryptoSession, peer_reconnect_token) or (None, None).
-    """
-    crypto = CryptoSession(session_code)
-    sig_key = derive_signaling_key(session_code)
+def _send_sig(ws, sig_key: bytes, msg: dict) -> None:
+    ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, json.dumps(msg).encode()))
 
-    # Send our public key + version info + optional reconnect token
-    pub_key_b64 = base64.b64encode(crypto.get_public_key_bytes()).decode()
-    msg: dict = {
-        "type":             "pub_key",
-        "key":              pub_key_b64,
-        "protocol_version": PROTOCOL_VERSION,
-        "app_version":      APP_VERSION,
-    }
-    if reconnect_token:
-        msg["reconnect_token"] = reconnect_token
 
-    sig_payload = json.dumps(msg).encode()
-    ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, sig_payload))
-
-    emit("relay_key_exchange")
-
-    # Receive peer's public key (blocks until peer connects + sends)
+def _recv_sig(ws, sig_key: bytes, expected_type: str) -> dict:
     try:
         raw = ws.recv()
-    except Exception as e:
-        emit("relay_key_exchange_error", error=str(e))
-        return None, None
-
+    except Exception as exc:
+        raise _SignalingError("relay_key_exchange_error", error=str(exc)) from exc
     if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
-        emit("relay_key_format_error")
-        return None, None
-
+        raise _SignalingError("relay_key_format_error")
     try:
-        peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
-    except Exception:
-        emit("relay_key_decrypt_error")
-        return None, None
+        msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
+    except Exception as exc:
+        raise _SignalingError("relay_key_decrypt_error") from exc
+    if "protocol_version" in msg:
+        _check_peer_version(msg)
+    if not isinstance(msg, dict) or msg.get("type") != expected_type:
+        raise _SignalingError("relay_key_message_error")
+    return msg
 
-    if peer_msg.get("type") != "pub_key" or "key" not in peer_msg:
-        emit("relay_key_message_error")
-        return None, None
 
-    # ── Version compatibility check ─────────────────────────────
-    peer_proto = peer_msg.get("protocol_version", 0)
-    peer_app   = peer_msg.get("app_version", "unknown")
+def _check_peer_version(msg: dict) -> None:
+    peer_proto = msg.get("protocol_version", 0)
+    peer_app = msg.get("app_version", "unknown")
+    log.info("Version negotiation: us=proto%d/app%s, peer=proto%s/app%s",
+             PROTOCOL_VERSION, APP_VERSION, peer_proto, peer_app)
+    if not isinstance(peer_proto, int) or peer_proto < MIN_PROTOCOL_VERSION:
+        raise _SignalingError("relay_incompatible", peer_proto=peer_proto, min_proto=MIN_PROTOCOL_VERSION)
+    if peer_proto > PROTOCOL_VERSION:
+        log.warning("Peer has newer protocol version (%d > %d)", peer_proto, PROTOCOL_VERSION)
+        raise _SignalingError("relay_peer_newer", peer_app=peer_app)
 
-    log.info(
-        "Version negotiation: us=proto%d/app%s, peer=proto%d/app%s",
-        PROTOCOL_VERSION, APP_VERSION, peer_proto, peer_app,
-    )
-    emit("relay_protocol_info",
-         our_proto=PROTOCOL_VERSION, peer_proto=peer_proto,
-         our_app=APP_VERSION, peer_app=peer_app)
 
-    if peer_proto < MIN_PROTOCOL_VERSION:
-        emit("relay_incompatible",
-             peer_proto=peer_proto, min_proto=MIN_PROTOCOL_VERSION)
-        return None, None
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
 
-    if PROTOCOL_VERSION < peer_proto:
-        # Peer requires a newer protocol — we might be too old
-        log.warning(
-            "Peer has newer protocol version (%d > %d). "
-            "Consider updating the app.",
-            peer_proto, PROTOCOL_VERSION,
+
+def _unb64(value: object, length: Optional[int] = None) -> bytes:
+    if not isinstance(value, str):
+        raise _SignalingError("relay_key_message_error")
+    try:
+        data = base64.b64decode(value, validate=True)
+    except Exception as exc:
+        raise _SignalingError("relay_key_message_error") from exc
+    if length is not None and len(data) != length:
+        raise _SignalingError("relay_key_message_error")
+    return data
+
+
+def _do_key_exchange(
+    ws,
+    secrets: SessionSecrets,
+    role: str,
+    emit: EmitCB,
+    previous: Optional[CryptoSession] = None,
+) -> tuple[Optional[CryptoSession], bool, bool]:
+    """
+    X25519 key exchange, commit-then-reveal, over signaling-encrypted frames.
+
+    The sender commits to its public key before it sees the receiver's, so a
+    relay that substitutes keys cannot search for a pair of fake keys with
+    matching verification codes (one guess at 40 bits instead).
+
+    Afterwards both sides exchange a session_proof (MAC under the previous
+    session key over the new public keys) so a reconnect can skip the
+    verification dialog.
+
+    Returns (crypto, fatal, reconnect_proven); crypto is None on failure and
+    `fatal` then says whether retrying makes sense.
+    """
+    crypto = CryptoSession(secrets, role)
+    sig_key = secrets.signaling_key
+    mine = crypto.get_public_key_bytes()
+    hello = {"protocol_version": PROTOCOL_VERSION, "app_version": APP_VERSION}
+
+    first: Optional[dict] = None
+    try:
+        if role == ROLE_SENDER:
+            commitment, opening = make_commitment(mine)
+            _send_sig(ws, sig_key, {"type": "commit", "commit": _b64(commitment), **hello})
+            emit("relay_key_exchange")
+            first = _recv_sig(ws, sig_key, "pub_key")
+            peer_pub = _unb64(first.get("key"), 32)
+            _send_sig(ws, sig_key, {"type": "reveal", "key": _b64(mine), "opening": _b64(opening)})
+        else:
+            emit("relay_key_exchange")
+            first = _recv_sig(ws, sig_key, "commit")
+            commitment = _unb64(first.get("commit"), 32)
+            _send_sig(ws, sig_key, {"type": "pub_key", "key": _b64(mine), **hello})
+            reveal = _recv_sig(ws, sig_key, "reveal")
+            peer_pub = _unb64(reveal.get("key"), 32)
+            if not check_commitment(commitment, peer_pub, _unb64(reveal.get("opening"), 32)):
+                # Someone swapped keys after seeing ours: treat as an attack
+                emit("relay_commit_mismatch")
+                return None, True, False
+
+        emit("relay_protocol_info", our_proto=PROTOCOL_VERSION, peer_proto=first.get("protocol_version"),
+             our_app=APP_VERSION, peer_app=first.get("app_version", "unknown"))
+        try:
+            crypto.derive_shared_key(peer_pub)
+        except Exception as exc:
+            raise _SignalingError("relay_key_message_error") from exc
+
+        proof = crypto.reconnect_proof(previous) if previous is not None else None
+        _send_sig(ws, sig_key, {"type": "session_proof", "mac": _b64(proof) if proof else None})
+        peer_mac = _recv_sig(ws, sig_key, "session_proof").get("mac")
+        proven = (
+            previous is not None
+            and peer_mac is not None
+            and crypto.check_reconnect_proof(previous, _unb64(peer_mac, 32))
         )
-        emit("relay_peer_newer", peer_app=peer_app)
+        return crypto, False, proven
 
-    # ── Derive shared key ───────────────────────────────────────
-    peer_pub_key = base64.b64decode(peer_msg["key"])
-    crypto.derive_shared_key(peer_pub_key)
-
-    peer_reconnect_token = peer_msg.get("reconnect_token")
-    return crypto, peer_reconnect_token
+    except _SignalingError as err:
+        emit(err.key, **err.fmt)
+        if first is None and err.key == "relay_key_exchange_error":
+            # Nobody showed up: v3.x and v4 clients use different rooms
+            emit("relay_peer_version_hint")
+        fatal = err.key in ("relay_incompatible", "relay_peer_newer")
+        return None, fatal, False
+    except Exception as exc:          # connection dropped while sending
+        emit("relay_key_exchange_error", error=str(exc))
+        return None, False, False
 
 
 def _do_verification(
@@ -702,6 +723,7 @@ class VPSRelaySender(_RelayPeer):
     """
 
     _ROLE = "Sender"
+    _CRYPTO_ROLE = ROLE_SENDER
     _WAITING_KEY = "relay_waiting_receiver"
 
     def __init__(
@@ -943,7 +965,7 @@ class VPSRelaySender(_RelayPeer):
 
     def _send_ctl(self, plaintext: bytes) -> None:
         try:
-            self._ws.send_binary(bytes([_CTL]) + self._crypto.encrypt(plaintext))
+            self._ws.send_binary(bytes([_CTL]) + self._crypto.encrypt(plaintext, b"C"))
         except Exception as exc:
             log.debug("VPS send ctl error: %s", exc)
             self._connection_lost.set()
@@ -951,8 +973,9 @@ class VPSRelaySender(_RelayPeer):
     def _send_dat(self, seq: int, chunk: bytes) -> None:
         try:
             payload = _compress(chunk)
-            payload = self._crypto.encrypt(payload)
-            frame   = bytes([_DAT]) + struct.pack("!I", seq) + payload
+            seq_bytes = struct.pack("!I", seq)
+            payload = self._crypto.encrypt(payload, b"D" + seq_bytes)
+            frame   = bytes([_DAT]) + seq_bytes + payload
             self._ws.send_binary(frame)
         except Exception as exc:
             log.debug("VPS send dat error: %s", exc)
@@ -967,7 +990,7 @@ class VPSRelaySender(_RelayPeer):
                     break
                 if isinstance(raw, bytes) and len(raw) >= 1 and raw[0] == _CTL:
                     try:
-                        msg = json.loads(self._crypto.decrypt(raw[1:]))
+                        msg = json.loads(self._crypto.decrypt(raw[1:], b"C"))
                         self._ctl_queue.put(msg)
                     except Exception as exc:
                         log.debug("VPS recv ctl decode error: %s", exc)
@@ -991,6 +1014,7 @@ class VPSRelayReceiver(_RelayPeer):
     """
 
     _ROLE = "Receiver"
+    _CRYPTO_ROLE = ROLE_RECEIVER
     _WAITING_KEY = "relay_waiting_sender"
 
     def __init__(
@@ -1042,7 +1066,7 @@ class VPSRelayReceiver(_RelayPeer):
 
                 if raw[0] == _CTL:
                     try:
-                        msg = json.loads(self._crypto.decrypt(raw[1:]))
+                        msg = json.loads(self._crypto.decrypt(raw[1:], b"C"))
                     except Exception:
                         continue
                     kind = msg.get("type")
@@ -1213,7 +1237,8 @@ class VPSRelayReceiver(_RelayPeer):
         seq = struct.unpack_from("!I", raw, 1)[0]
         if seq not in rx.received:
             try:
-                chunk = _decompress(self._crypto.decrypt(raw[5:]))
+                # the chunk number is authenticated: a moved/reordered frame fails here
+                chunk = _decompress(self._crypto.decrypt(raw[5:], b"D" + raw[1:5]))
             except Exception:
                 chunk = None
             # A full write queue drops the chunk; it is re-requested later
@@ -1237,7 +1262,7 @@ class VPSRelayReceiver(_RelayPeer):
 
     def _send_ctl(self, plaintext: bytes) -> None:
         try:
-            self._ws.send_binary(bytes([_CTL]) + self._crypto.encrypt(plaintext))
+            self._ws.send_binary(bytes([_CTL]) + self._crypto.encrypt(plaintext, b"C"))
         except Exception as exc:
             log.debug("VPS recv-side send ctl: %s", exc)
 

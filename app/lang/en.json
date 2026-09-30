@@ -185,6 +185,8 @@
   "relay_key_message_error": "❌ Invalid key exchange message",
   "relay_protocol_info": "🔗 Protocol: v{our_proto} ↔ v{peer_proto} (app {our_app} ↔ {peer_app})",
   "relay_incompatible": "❌ Incompatible peer version (protocol v{peer_proto}, need v{min_proto}+). Ask the peer to update.",
+  "relay_commit_mismatch": "❌ The peer's key does not match its commitment — possible man-in-the-middle attack. Connection closed.",
+  "relay_peer_version_hint": "ℹ️ If the other side never connects, make sure they run SecureShare 4.0 or newer (older versions cannot connect to 4.x).",
   "relay_peer_newer": "⚠️ Peer has a newer version (v{peer_app}). We recommend updating.",
 
   "relay_auto_verify": "🔄 Auto-verification (reconnect)",

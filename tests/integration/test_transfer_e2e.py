@@ -132,10 +132,13 @@ def test_existing_file_is_kept_and_new_one_renamed(transfer, tmp_path):
 
 
 def test_rooms_are_cleaned_up(transfer, tmp_path, relay):
+    import hashlib
+    from app.crypto_utils import SessionSecrets
     src = tmp_path / "x.bin"
     src.write_bytes(b"abc")
-    transfer(src).start().join()
+    run = transfer(src).start().join()
+    room = hashlib.sha256(SessionSecrets.from_code(run.code).room_id.encode()).hexdigest()[:32]
     deadline = time.monotonic() + 5
-    while relay.active_rooms() and time.monotonic() < deadline:
+    while room in relay.server._rooms and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert relay.active_rooms() == 0
+    assert room not in relay.server._rooms
