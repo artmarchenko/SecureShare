@@ -945,14 +945,41 @@ git worktree prune
 
 ## 11. Testing
 
-### 11.1. Server Tests
+### 11.0. Automated Test Suite (pytest)
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest                       # everything (~1.5 min)
+python -m pytest -m unit               # fast unit tests (~1 s)
+python -m pytest -m "integration or adversarial"
+python -m pytest -m ui                 # GUI tests (need a display; Linux CI uses xvfb-run)
+python -m pytest --cov --cov-report=term
+```
+
+| Layer | Folder | What it covers |
+|-------|--------|----------------|
+| unit | `tests/unit/` | crypto, wire helpers, resume manifest, i18n, updater (malicious archives, fake CDN), telemetry privacy |
+| server | `tests/server/` | HTTP API, rate limiting, admin auth, analytics persistence |
+| integration | `tests/integration/` | real sender/receiver through the repo's relay started in-process on loopback: sizes, cancel, resume, auto-reconnect |
+| adversarial | `tests/adversarial/` | receiver input validation against a scripted peer (path traversal, bad sizes, retransmit, garbage frames) |
+| ui | `tests/ui/` | the real CustomTkinter window driven programmatically, incl. full transfers through the GUI |
+
+Safety: `tests/conftest.py` redirects `APPDATA` to a temp dir and blocks every
+non-loopback connection, so tests never touch real settings, production or GitHub.
+Known defects are recorded as `xfail(strict=True)` with the finding ID from
+`REMEDIATION_PLAN.md`; when a fix lands the test flips and the marker must be removed.
+
+CI: `.github/workflows/tests.yml` (Windows + Linux) runs on every push/PR and
+gates `release.yml` builds. Coverage threshold: `.coveragerc` (`fail_under`).
+
+### 11.1. Live Server Smoke Tests
 
 ```bash
 pip install websocket-client
 python server/test_relay.py
 ```
 
-The test suite includes 16+ tests against the **live VPS**:
+This script runs 15 checks against the **live VPS**:
 
 | Test | What it verifies |
 |------|-----------------|
@@ -995,6 +1022,9 @@ What it checks:
 - Version sync across `app/config.py`, `version_info.txt`, `server/relay_server.py`
 - Server invariants (`/health` active_rooms guard + analytics restore on startup)
 - Landing i18n invariants (language buttons + `en/de` key coverage for all `data-i18n`)
+- App i18n: every `app/lang/*.json` is valid, same keys and same `{placeholders}` in all languages
+
+The pre-push hook also runs the fast unit tests (`pytest -m unit`).
 
 Optional: enforce automatically via Git hook:
 
