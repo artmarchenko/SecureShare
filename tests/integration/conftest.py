@@ -7,25 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app import ws_relay
 from app.ws_relay import VPSRelayReceiver, VPSRelaySender
-from tests.helpers.local_relay import LocalRelay
-
-
-@pytest.fixture(scope="session")
-def local_relay(tmp_path_factory):
-    relay = LocalRelay(tmp_path_factory.mktemp("relay-data"))
-    yield relay
-    relay.close()
-
-
-@pytest.fixture
-def relay(local_relay, monkeypatch):
-    """Point the client at the local relay and make reconnects fast."""
-    monkeypatch.setattr(ws_relay, "VPS_RELAY_URL", local_relay.url)
-    monkeypatch.setattr(ws_relay, "RECONNECT_BASE_DELAY", 0.1)
-    monkeypatch.setattr(ws_relay, "RECONNECT_MAX_DELAY", 0.5)
-    return local_relay
 
 
 def new_code() -> str:
