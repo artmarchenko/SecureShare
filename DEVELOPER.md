@@ -1056,11 +1056,34 @@ Secrets configured in repository settings:
 | `VPS_HOST` | all deploy workflows | VPS IP address for deployment |
 | `VPS_USER` | all deploy workflows | SSH username on VPS |
 | `VPS_SSH_KEY` | all deploy workflows | Full SSH private key for VPS access |
+| `RELEASE_SIGNING_KEY` | `release.yml` | Ed25519 key that signs `SHA256SUMS.txt` (see 12.3) |
 | `CERT_THUMBPRINT` | *(future)* | Code signing certificate |
 | `DUCKDNS_TOKEN` | *(future)* | DuckDNS API token for IP updates |
 | `GITHUB_TOKEN` | `release.yml` | Auto-provided for GitHub Release creation |
 
-### 12.3. Rules
+### 12.3. Release Signing (auto-update trust)
+
+The auto-updater installs an update only if `SHA256SUMS.txt` carries a valid
+Ed25519 signature (`SHA256SUMS.txt.sig`) from a key listed in
+`app/updater.py` → `TRUSTED_RELEASE_KEYS`, and the archive is listed in it.
+A compromised GitHub account or CDN therefore cannot push an update.
+
+| Key | Private half | Public half |
+|-----|--------------|-------------|
+| primary | GitHub secret `RELEASE_SIGNING_KEY` only | in `TRUSTED_RELEASE_KEYS` |
+| backup | offline with the maintainer (password manager / USB), never in the repo or CI | in `TRUSTED_RELEASE_KEYS` |
+
+- CI signs in `release.yml` (`scripts/release_signing.py sign`) and fails if the
+  secret is missing or is not one of the embedded keys.
+- Verify any release by hand: `python scripts/release_signing.py verify SHA256SUMS.txt SHA256SUMS.txt.sig`
+- **Rotation (primary lost or leaked):** put the *backup* private key into
+  `RELEASE_SIGNING_KEY`, generate a new pair
+  (`python scripts/release_signing.py generate <file>`), replace the old
+  primary in `TRUSTED_RELEASE_KEYS` with the new public key (keep the
+  backup's), release. Installed clients accept that release via the backup
+  key; later releases can go back to being signed with the new primary.
+
+### 12.4. Rules
 
 1. **Never** hardcode secrets in source files
 2. Use `os.environ["KEY"]` or `${{ secrets.KEY }}` for access

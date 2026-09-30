@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import os
@@ -6,6 +7,8 @@ import tarfile
 import zipfile
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app import updater
 from app.updater import (
@@ -213,16 +216,47 @@ def test_fetch_checksums_unreachable_returns_empty(cdn):
 
 # ── download_and_verify end-to-end against a fake CDN ───────────────
 
-def _release(cdn, archive: bytes, name: str, sums: bytes | None, size: int | None = None) -> ReleaseInfo:
+REAL_RELEASE_KEYS = updater.TRUSTED_RELEASE_KEYS   # captured before tests swap them
+RELEASE_KEY = Ed25519PrivateKey.generate()
+FOREIGN_KEY = Ed25519PrivateKey.generate()
+
+
+def _pub(key) -> str:
+    return base64.b64encode(key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode()
+
+
+def _sign(sums: bytes, key=RELEASE_KEY) -> bytes:
+    return base64.b64encode(key.sign(sums)) + b"\n"
+
+
+@pytest.fixture(autouse=True)
+def trusted_test_key(monkeypatch):
+    """Tests trust a throw-away key instead of the real release keys."""
+    monkeypatch.setattr(updater, "TRUSTED_RELEASE_KEYS", (_pub(RELEASE_KEY),))
+
+
+def _sums(arc: bytes, name: str = "SecureShare-v9.9.9.zip") -> bytes:
+    return f"{hashlib.sha256(arc).hexdigest()}  {name}\n".encode()
+
+
+def _release(cdn, archive: bytes, name: str, sums: bytes | None, size: int | None = None,
+             signature: bytes | None | str = "sign") -> ReleaseInfo:
+    """Publish `archive` (+ SHA256SUMS.txt and, by default, a valid signature)."""
     cdn.files[f"/{name}"] = archive
-    checksums_url = ""
+    checksums_url = signature_url = ""
     if sums is not None:
         cdn.files["/SHA256SUMS.txt"] = sums
         checksums_url = cdn.url("/SHA256SUMS.txt")
+        if signature == "sign":
+            signature = _sign(sums)
+        if signature is not None:
+            cdn.files["/SHA256SUMS.txt.sig"] = signature
+            signature_url = cdn.url("/SHA256SUMS.txt.sig")
     return ReleaseInfo(
         tag="v9.9.9", version="9.9.9", name="v9", body="", html_url="", published="",
         win_download=cdn.url(f"/{name}"), win_size=len(archive) if size is None else size,
-        checksums_url=checksums_url,
+        checksums_url=checksums_url, signature_url=signature_url,
     )
 
 
@@ -233,8 +267,7 @@ def windows(monkeypatch):
 
 def test_download_ok(cdn, windows):
     arc = make_zip({"SecureShare.exe": fake_pe()})
-    sums = f"{hashlib.sha256(arc).hexdigest()}  SecureShare-v9.9.9.zip\n".encode()
-    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", sums))
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", _sums(arc)))
     assert err == ""
     assert binary.read_bytes() == fake_pe()
 
@@ -248,30 +281,74 @@ def test_download_sha_mismatch_is_rejected(cdn, windows):
 
 def test_download_size_mismatch_is_rejected(cdn, windows):
     arc = make_zip({"SecureShare.exe": fake_pe()})
-    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", None, size=123))
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", _sums(arc), size=123))
     assert binary is None and "Size mismatch" in err
 
 
 def test_download_with_non_executable_payload_is_rejected(cdn, windows):
     arc = make_zip({"SecureShare.exe": os.urandom(1_100_000)})
-    sums = f"{hashlib.sha256(arc).hexdigest()}  SecureShare-v9.9.9.zip\n".encode()
-    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", sums))
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", _sums(arc)))
     assert binary is None and "PE header" in err
 
 
-@pytest.mark.xfail(strict=True, reason="S5: updater is fail-open when SHA256SUMS.txt is missing")
+# ── S5 / S6: fail-closed, signed checksums ──────────────────────────
+
 def test_download_without_checksums_is_rejected(cdn, windows):
     arc = make_zip({"SecureShare.exe": fake_pe()})
     binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", None))
-    assert binary is None
+    assert binary is None and "no signed checksums" in err
 
 
-@pytest.mark.xfail(strict=True, reason="S5: archive missing from SHA256SUMS.txt is still installed")
 def test_download_not_listed_in_checksums_is_rejected(cdn, windows):
     arc = make_zip({"SecureShare.exe": fake_pe()})
-    sums = b"abcd  SomethingElse.zip\n"
-    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", sums))
-    assert binary is None
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", b"abcd  SomethingElse.zip\n"))
+    assert binary is None and "not listed" in err
+
+
+def test_unsigned_checksums_are_rejected(cdn, windows):
+    arc = make_zip({"SecureShare.exe": fake_pe()})
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", _sums(arc), signature=None))
+    assert binary is None and "no signed checksums" in err
+
+
+def test_checksums_signed_by_unknown_key_are_rejected(cdn, windows):
+    # e.g. an attacker with access to the GitHub account re-signs with their own key
+    arc = make_zip({"SecureShare.exe": fake_pe()})
+    sums = _sums(arc)
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", sums,
+                                               signature=_sign(sums, FOREIGN_KEY)))
+    assert binary is None and "signature is invalid" in err
+
+
+def test_tampered_checksums_are_rejected(cdn, windows):
+    # attacker swaps the archive and edits SHA256SUMS.txt, keeping the old signature
+    good = make_zip({"SecureShare.exe": fake_pe()})
+    evil = make_zip({"SecureShare.exe": fake_pe(1_200_000)})
+    signature = _sign(_sums(good))
+    binary, err = download_and_verify(_release(cdn, evil, "SecureShare-v9.9.9.zip", _sums(evil),
+                                               signature=signature))
+    assert binary is None and "signature is invalid" in err
+
+
+def test_garbage_signature_is_rejected(cdn, windows):
+    arc = make_zip({"SecureShare.exe": fake_pe()})
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", _sums(arc),
+                                               signature=b"not base64 at all!!"))
+    assert binary is None and "signature is invalid" in err
+
+
+def test_backup_key_is_also_trusted(monkeypatch):
+    backup = Ed25519PrivateKey.generate()
+    monkeypatch.setattr(updater, "TRUSTED_RELEASE_KEYS", (_pub(RELEASE_KEY), _pub(backup)))
+    sums = b"x  y\n"
+    assert updater.verify_checksums_signature(sums, _sign(sums, backup).decode())
+    assert not updater.verify_checksums_signature(sums, _sign(sums, FOREIGN_KEY).decode())
+
+
+def test_real_release_keys_are_well_formed():
+    assert len(REAL_RELEASE_KEYS) >= 2          # primary + offline backup
+    for key in REAL_RELEASE_KEYS:
+        assert len(base64.b64decode(key, validate=True)) == 32
 
 
 # ── fetch_latest_release asset selection ────────────────────────────
@@ -286,12 +363,14 @@ def test_fetch_latest_release_picks_versioned_assets(cdn, monkeypatch):
             {"name": "SecureShare-linux-x64.tar.gz", "browser_download_url": "u-plain-tgz", "size": 3},
             {"name": "SecureShare-v9.9.9-linux-x64.tar.gz", "browser_download_url": "u-tgz", "size": 4},
             {"name": "SHA256SUMS.txt", "browser_download_url": "u-sums", "size": 5},
+            {"name": "SHA256SUMS.txt.sig", "browser_download_url": "u-sig", "size": 6},
         ],
     }).encode()
     monkeypatch.setattr(updater, "GITHUB_API_URL", cdn.url("/latest"))
     rel = updater.fetch_latest_release()
     assert (rel.version, rel.win_download, rel.win_size) == ("9.9.9", "u-zip", 2)
     assert (rel.linux_download, rel.linux_size, rel.checksums_url) == ("u-tgz", 4, "u-sums")
+    assert rel.signature_url == "u-sig"
 
 
 def test_check_for_update_respects_skip_and_downgrade(cdn, monkeypatch):
@@ -321,7 +400,7 @@ def _update_dirs():
 def test_failed_download_leaves_no_temp_dir(cdn, windows):
     before = _update_dirs()
     arc = make_zip({"SecureShare.exe": fake_pe()})
-    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", None, size=1))
+    binary, err = download_and_verify(_release(cdn, arc, "SecureShare-v9.9.9.zip", _sums(arc), size=1))
     assert binary is None and "Size mismatch" in err
     assert _update_dirs() == before
 
