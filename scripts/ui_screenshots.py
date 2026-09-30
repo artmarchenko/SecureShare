@@ -73,8 +73,9 @@ def main() -> int:
 
     def offline(*args, **kwargs):
         raise OSError("offline (screenshot mode)")
-    gui.socket.create_connection = offline                 # diagnostics stay local
-    gui.socket.gethostbyname = offline
+    from app import diagnostics as diagnostics_window
+    diagnostics_window.socket.create_connection = offline  # diagnostics stay local
+    diagnostics_window.socket.gethostbyname = offline
 
     sample = Path(tempfile.mkdtemp()) / "Quarterly report 2026.pdf"
     sample.write_bytes(b"x" * 3_400_000)
