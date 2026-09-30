@@ -59,6 +59,7 @@ import struct
 import threading
 import time
 import zlib
+from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -104,9 +105,96 @@ from .crypto_utils import (
     signaling_decrypt,
 )
 
+
+class TransferState(str, Enum):
+    """Coarse transfer phase, reported to the UI via `on_state`."""
+    CONNECTING   = "connecting"
+    WAITING      = "waiting"
+    KEY_EXCHANGE = "key_exchange"
+    VERIFYING    = "verifying"
+    TRANSFERRING = "transferring"
+    DONE         = "done"
+    ERROR        = "error"
+
+
 ProgressCB = Callable[[int, int, float], None]
 StatusCB   = Callable[[str], None]
+StateCB    = Callable[[TransferState], None]
 VerifyCB   = Callable[[str], bool]   # verification_code → user_confirmed
+EmitCB     = Callable[..., None]     # emit(message_key, **format_args)
+
+_S = TransferState
+# Which status message moves the transfer into which phase. Messages not
+# listed here are informational and leave the phase unchanged.
+_STATE_FOR_MESSAGE: dict[str, TransferState] = {
+    # connecting / waiting
+    "relay_connecting_to":       _S.CONNECTING,
+    "relay_reconnecting_to":     _S.CONNECTING,
+    "relay_waiting_receiver":    _S.WAITING,
+    "relay_waiting_sender":      _S.WAITING,
+    "relay_waiting_meta":        _S.WAITING,
+    "relay_waiting_meta_ack":    _S.WAITING,
+    "relay_waiting_integrity":   _S.WAITING,
+    # handshake
+    "relay_key_exchange":        _S.KEY_EXCHANGE,
+    "relay_verify_code":         _S.VERIFYING,
+    # data
+    "relay_sending":             _S.TRANSFERRING,
+    "relay_sending_resume":      _S.TRANSFERRING,
+    "relay_receiving":           _S.TRANSFERRING,
+    "relay_receiving_resume":    _S.TRANSFERRING,
+    # outcome
+    "relay_file_sent_ok":        _S.DONE,
+    "relay_saved":               _S.DONE,
+    # errors
+    "relay_need_ws":             _S.ERROR,
+    "relay_file_read_error":     _S.ERROR,
+    "relay_retries_exhausted":   _S.ERROR,
+    "relay_connect_error":       _S.ERROR,
+    "relay_key_exchange_error":  _S.ERROR,
+    "relay_key_format_error":    _S.ERROR,
+    "relay_key_decrypt_error":   _S.ERROR,
+    "relay_key_message_error":   _S.ERROR,
+    "relay_incompatible":        _S.ERROR,
+    "relay_auto_verify_error":   _S.ERROR,
+    "relay_verify_rejected":     _S.ERROR,
+    "relay_verify_error":        _S.ERROR,
+    "relay_verify_format_error": _S.ERROR,
+    "relay_verify_decrypt_error": _S.ERROR,
+    "relay_peer_rejected":       _S.ERROR,
+    "relay_verify_msg_error":    _S.ERROR,
+    "relay_meta_timeout":        _S.ERROR,
+    "relay_meta_unexpected":     _S.ERROR,
+    "relay_integrity_timeout":   _S.ERROR,
+    "relay_unsafe_filename":     _S.ERROR,
+    "relay_path_traversal":      _S.ERROR,
+    "relay_invalid_filesize":    _S.ERROR,
+    "relay_file_too_large":      _S.ERROR,
+    "relay_part_open_error":     _S.ERROR,
+    "relay_file_create_error":   _S.ERROR,
+    "relay_hash_mismatch_recv":  _S.ERROR,
+    "transfer_error_generic":    _S.ERROR,
+}
+del _S
+
+
+class _RelayPeer:
+    """Behaviour shared by VPSRelaySender and VPSRelayReceiver."""
+
+    _ROLE = "Peer"
+    on_status: Optional[StatusCB]
+    on_state: Optional[StateCB]
+
+    def _emit(self, key: str, **fmt) -> None:
+        """Log a translated status message and report the phase it implies."""
+        msg = t(key, **fmt)
+        log.info("[%s] %s", self._ROLE, msg)
+        if self.on_status:
+            self.on_status(msg)
+        state = _STATE_FOR_MESSAGE.get(key)
+        if state is not None and self.on_state:
+            self.on_state(state)
+
 
 _SIG = 0x53   # 'S'  signaling frame (key exchange / verification)
 _CTL = 0x43   # 'C'  control frame   (E2E encrypted)
@@ -281,7 +369,7 @@ def _unique_path(path: Path) -> Path:
 def _do_key_exchange(
     ws,
     session_code: str,
-    on_status: Optional[StatusCB],
+    emit: EmitCB,
     reconnect_token: Optional[str] = None,
 ) -> tuple[Optional[CryptoSession], Optional[str]]:
     """
@@ -313,32 +401,27 @@ def _do_key_exchange(
     sig_payload = json.dumps(msg).encode()
     ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, sig_payload))
 
-    if on_status:
-        on_status(t("relay_key_exchange"))
+    emit("relay_key_exchange")
 
     # Receive peer's public key (blocks until peer connects + sends)
     try:
         raw = ws.recv()
     except Exception as e:
-        if on_status:
-            on_status(t("relay_key_exchange_error", error=str(e)))
+        emit("relay_key_exchange_error", error=str(e))
         return None, None
 
     if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
-        if on_status:
-            on_status(t("relay_key_format_error"))
+        emit("relay_key_format_error")
         return None, None
 
     try:
         peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
     except Exception:
-        if on_status:
-            on_status(t("relay_key_decrypt_error"))
+        emit("relay_key_decrypt_error")
         return None, None
 
     if peer_msg.get("type") != "pub_key" or "key" not in peer_msg:
-        if on_status:
-            on_status(t("relay_key_message_error"))
+        emit("relay_key_message_error")
         return None, None
 
     # ── Version compatibility check ─────────────────────────────
@@ -349,15 +432,13 @@ def _do_key_exchange(
         "Version negotiation: us=proto%d/app%s, peer=proto%d/app%s",
         PROTOCOL_VERSION, APP_VERSION, peer_proto, peer_app,
     )
-    if on_status:
-        on_status(t("relay_protocol_info",
-                    our_proto=PROTOCOL_VERSION, peer_proto=peer_proto,
-                    our_app=APP_VERSION, peer_app=peer_app))
+    emit("relay_protocol_info",
+         our_proto=PROTOCOL_VERSION, peer_proto=peer_proto,
+         our_app=APP_VERSION, peer_app=peer_app)
 
     if peer_proto < MIN_PROTOCOL_VERSION:
-        if on_status:
-            on_status(t("relay_incompatible",
-                        peer_proto=peer_proto, min_proto=MIN_PROTOCOL_VERSION))
+        emit("relay_incompatible",
+             peer_proto=peer_proto, min_proto=MIN_PROTOCOL_VERSION)
         return None, None
 
     if PROTOCOL_VERSION < peer_proto:
@@ -367,8 +448,7 @@ def _do_key_exchange(
             "Consider updating the app.",
             peer_proto, PROTOCOL_VERSION,
         )
-        if on_status:
-            on_status(t("relay_peer_newer", peer_app=peer_app))
+        emit("relay_peer_newer", peer_app=peer_app)
 
     # ── Derive shared key ───────────────────────────────────────
     peer_pub_key = base64.b64decode(peer_msg["key"])
@@ -383,7 +463,7 @@ def _do_verification(
     crypto: CryptoSession,
     sig_key: bytes,
     on_verify: VerifyCB,
-    on_status: Optional[StatusCB],
+    emit: EmitCB,
     auto_verify: bool = False,
 ) -> bool:
     """
@@ -397,8 +477,7 @@ def _do_verification(
     verification_code = crypto.get_verification_code()
 
     if auto_verify:
-        if on_status:
-            on_status(t("relay_auto_verify"))
+        emit("relay_auto_verify")
         # Send confirmation without user interaction
         confirm_payload = json.dumps({"type": "verified"}).encode()
         ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, confirm_payload))
@@ -406,8 +485,7 @@ def _do_verification(
         try:
             raw = ws.recv()
         except Exception as e:
-            if on_status:
-                on_status(t("relay_auto_verify_error", error=str(e)))
+            emit("relay_auto_verify_error", error=str(e))
             return False
 
         if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
@@ -419,14 +497,12 @@ def _do_verification(
             return False
 
         if peer_msg.get("type") == "verified":
-            if on_status:
-                on_status(t("relay_auto_verify_ok"))
+            emit("relay_auto_verify_ok")
             return True
         return False
 
     # ── Normal verification (user interaction) ────────────────
-    if on_status:
-        on_status(t("relay_verify_code", code=verification_code))
+    emit("relay_verify_code", code=verification_code)
 
     # Ask user to verify
     if not on_verify(verification_code):
@@ -436,49 +512,41 @@ def _do_verification(
             ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, reject_payload))
         except Exception:
             pass
-        if on_status:
-            on_status(t("relay_verify_rejected"))
+        emit("relay_verify_rejected")
         return False
 
     # Send verification confirmation
     confirm_payload = json.dumps({"type": "verified"}).encode()
     ws.send_binary(bytes([_SIG]) + signaling_encrypt(sig_key, confirm_payload))
 
-    if on_status:
-        on_status(t("relay_verify_confirmed"))
+    emit("relay_verify_confirmed")
 
     # Wait for peer's verification
     try:
         raw = ws.recv()
     except Exception as e:
-        if on_status:
-            on_status(t("relay_verify_error", error=str(e)))
+        emit("relay_verify_error", error=str(e))
         return False
 
     if not raw or not isinstance(raw, bytes) or len(raw) < 2 or raw[0] != _SIG:
-        if on_status:
-            on_status(t("relay_verify_format_error"))
+        emit("relay_verify_format_error")
         return False
 
     try:
         peer_msg = json.loads(signaling_decrypt(sig_key, raw[1:]))
     except Exception:
-        if on_status:
-            on_status(t("relay_verify_decrypt_error"))
+        emit("relay_verify_decrypt_error")
         return False
 
     if peer_msg.get("type") == "verify_reject":
-        if on_status:
-            on_status(t("relay_peer_rejected"))
+        emit("relay_peer_rejected")
         return False
 
     if peer_msg.get("type") != "verified":
-        if on_status:
-            on_status(t("relay_verify_msg_error"))
+        emit("relay_verify_msg_error")
         return False
 
-    if on_status:
-        on_status(t("relay_both_verified"))
+    emit("relay_both_verified")
 
     return True
 
@@ -487,7 +555,7 @@ def _do_verification(
 #  VPSRelaySender
 # ════════════════════════════════════════════════════════════════════
 
-class VPSRelaySender:
+class VPSRelaySender(_RelayPeer):
     """
     Send a file through the VPS relay server.
 
@@ -496,6 +564,8 @@ class VPSRelaySender:
     GUI only needs to provide callbacks for progress, status, and verification.
     """
 
+    _ROLE = "Sender"
+
     def __init__(
         self,
         session_code: str,
@@ -503,11 +573,13 @@ class VPSRelaySender:
         on_progress: Optional[ProgressCB] = None,
         on_status:   Optional[StatusCB]   = None,
         on_verify:   Optional[VerifyCB]   = None,
+        on_state:    Optional[StateCB]    = None,
     ):
         self._code       = session_code
         self._filepath   = Path(filepath)
         self.on_progress = on_progress
         self.on_status   = on_status
+        self.on_state    = on_state
         self.on_verify   = on_verify or (lambda code: True)
         self._cancelled  = False
         self._ws: Optional[websocket.WebSocket] = None
@@ -538,20 +610,20 @@ class VPSRelaySender:
         Returns True on success, False on failure/cancel.
         """
         if not _HAS_WS:
-            self._log(t("relay_need_ws"))
+            self._emit("relay_need_ws")
             return False
 
         # Pre-compute file metadata once (expensive for large files)
         try:
             file_name = self._filepath.name
             file_size = self._filepath.stat().st_size
-            self._log(t("relay_computing_hash", filename=file_name))
+            self._emit("relay_computing_hash", filename=file_name)
             self._file_hash = _sha256_file(self._filepath)
             self._transfer_id = _make_transfer_id(
                 file_name, file_size, self._file_hash
             )
         except Exception as exc:
-            self._log(t("relay_file_read_error", error=str(exc)))
+            self._emit("relay_file_read_error", error=str(exc))
             return False
 
         for attempt in range(RECONNECT_MAX_RETRIES + 1):
@@ -563,8 +635,8 @@ class VPSRelaySender:
                     RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
                     RECONNECT_MAX_DELAY,
                 )
-                self._log(t("relay_reconnecting",
-                            delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
+                self._emit("relay_reconnecting",
+                           delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES)
                 time.sleep(delay)
                 if self._cancelled:
                     return False
@@ -580,14 +652,14 @@ class VPSRelaySender:
                     # Permanent failure (cancel, verification rejected, etc.)
                     return False
                 # result is None → connection lost, retry
-                self._log(t("relay_connection_lost"))
+                self._emit("relay_connection_lost")
             except Exception as exc:
-                self._log(t("transfer_error_generic", error=str(exc)))
+                self._emit("transfer_error_generic", error=str(exc))
                 log.exception("VPSRelaySender error")
             finally:
                 self._close()
 
-        self._log(t("relay_retries_exhausted"))
+        self._emit("relay_retries_exhausted")
         return False
 
     def _send_attempt(self, is_reconnect: bool = False) -> Optional[bool]:
@@ -600,26 +672,26 @@ class VPSRelaySender:
         """
         # ── 1. Connect to VPS ─────────────────────────────────────
         if is_reconnect:
-            self._log(t("relay_reconnecting_to"))
+            self._emit("relay_reconnecting_to")
         else:
-            self._log(t("relay_connecting_to"))
+            self._emit("relay_connecting_to")
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(VPS_RELAY_URL, timeout=30)
             self._ws.settimeout(300)       # 5 min to wait for peer
             self._ws.send(self._code)      # register session code
         except Exception as exc:
-            self._log(t("relay_connect_error", error=str(exc)))
+            self._emit("relay_connect_error", error=str(exc))
             # DNS failures are transient — always allow retry
             if _is_dns_error(exc):
                 return None
             return None if is_reconnect else False
 
-        self._log(t("relay_waiting_receiver"))
+        self._emit("relay_waiting_receiver")
 
         # ── 2. Key exchange ───────────────────────────────────────
         self._crypto, peer_token = _do_key_exchange(
-            self._ws, self._code, self.on_status,
+            self._ws, self._code, self._emit,
             reconnect_token=self._reconnect_token,
         )
         if not self._crypto:
@@ -643,7 +715,7 @@ class VPSRelaySender:
 
         if not _do_verification(
             self._ws, self._crypto, sig_key,
-            self.on_verify, self.on_status,
+            self.on_verify, self._emit,
             auto_verify=auto_verify,
         ):
             return False  # verification rejected = permanent failure
@@ -671,16 +743,16 @@ class VPSRelaySender:
         }).encode())
 
         # Wait for meta ACK (may include resume info)
-        self._log(t("relay_waiting_meta_ack"))
+        self._emit("relay_waiting_meta_ack")
         ack = self._wait_ctl(120)
         if ack is None:
             if self._cancelled:
                 return False
             if not self._connection_lost.is_set():
-                self._log(t("relay_meta_timeout"))
+                self._emit("relay_meta_timeout")
             return None  # retryable
         if ack.get("type") != "relay_meta_ack":
-            self._log(t("relay_meta_unexpected"))
+            self._emit("relay_meta_unexpected")
             return None
 
         # ── 5b. Check if receiver requests resume ─────────────────
@@ -694,18 +766,18 @@ class VPSRelaySender:
                 last_chunk_size = file_size - (total_chunks - 1) * VPS_CHUNK_SIZE
                 resume_bytes = resume_bytes - VPS_CHUNK_SIZE + last_chunk_size
             resume_bytes = min(resume_bytes, file_size)
-            self._log(t("relay_resume_info",
-                        received=len(skip_chunks), total=total_chunks,
-                        mb=f"{resume_bytes / (1024**2):.1f}"))
+            self._emit("relay_resume_info",
+                       received=len(skip_chunks), total=total_chunks,
+                       mb=f"{resume_bytes / (1024**2):.1f}")
 
         # ── 6. Send file chunks ───────────────────────────────────
         size_str = human_size(file_size)
         chunks_to_send = total_chunks - len(skip_chunks)
         if skip_chunks:
-            self._log(t("relay_sending_resume",
-                        filename=file_name, size=size_str, chunks=chunks_to_send))
+            self._emit("relay_sending_resume",
+                       filename=file_name, size=size_str, chunks=chunks_to_send)
         else:
-            self._log(t("relay_sending", filename=file_name, size=size_str))
+            self._emit("relay_sending", filename=file_name, size=size_str)
 
         t0 = time.monotonic()
         sent_bytes = resume_bytes
@@ -751,7 +823,7 @@ class VPSRelaySender:
             "total_chunks": total_chunks,
         }).encode()
         self._send_ctl(done_payload)
-        self._log(t("relay_waiting_integrity"))
+        self._emit("relay_waiting_integrity")
 
         retransmit_rounds = 0
         deadline = time.monotonic() + 600
@@ -772,9 +844,9 @@ class VPSRelaySender:
             if msg.get("type") == "relay_done_ack":
                 ok = msg.get("verified", False)
                 if ok:
-                    self._log(t("relay_file_sent_ok"))
+                    self._emit("relay_file_sent_ok")
                 else:
-                    self._log(t("relay_hash_mismatch_sender"))
+                    self._emit("relay_hash_mismatch_sender")
                 return ok
 
             elif msg.get("type") == "relay_retransmit" and retransmit_rounds < 5:
@@ -782,8 +854,8 @@ class VPSRelaySender:
                 if not missing:
                     continue
                 retransmit_rounds += 1
-                self._log(t("relay_retransmit",
-                            count=len(missing), round=retransmit_rounds))
+                self._emit("relay_retransmit",
+                           count=len(missing), round=retransmit_rounds)
                 with open(self._filepath, "rb") as f:
                     for seq_i in missing:
                         if self._cancelled:
@@ -796,7 +868,7 @@ class VPSRelaySender:
                             self._send_dat(seq_i, chunk)
                 self._send_ctl(done_payload)
 
-        self._log(t("relay_integrity_timeout"))
+        self._emit("relay_integrity_timeout")
         return None  # retryable (might be connection issue)
 
     # ── Send helpers ───────────────────────────────────────────────
@@ -861,17 +933,12 @@ class VPSRelaySender:
         except Exception:
             pass
 
-    def _log(self, msg: str) -> None:
-        log.info("[Sender] %s", msg)
-        if self.on_status:
-            self.on_status(msg)
-
 
 # ════════════════════════════════════════════════════════════════════
 #  VPSRelayReceiver
 # ════════════════════════════════════════════════════════════════════
 
-class VPSRelayReceiver:
+class VPSRelayReceiver(_RelayPeer):
     """
     Receive a file through the VPS relay server.
 
@@ -880,6 +947,8 @@ class VPSRelayReceiver:
     GUI only needs to provide callbacks for progress, status, and verification.
     """
 
+    _ROLE = "Receiver"
+
     def __init__(
         self,
         session_code: str,
@@ -887,11 +956,13 @@ class VPSRelayReceiver:
         on_progress: Optional[ProgressCB] = None,
         on_status:   Optional[StatusCB]   = None,
         on_verify:   Optional[VerifyCB]   = None,
+        on_state:    Optional[StateCB]    = None,
     ):
         self._code       = session_code
         self._save_dir   = Path(save_dir)
         self.on_progress = on_progress
         self.on_status   = on_status
+        self.on_state    = on_state
         self.on_verify   = on_verify or (lambda code: True)
         self._cancelled  = False
         self._ws: Optional[websocket.WebSocket] = None
@@ -917,7 +988,7 @@ class VPSRelayReceiver:
         Returns Path to saved file on success, None on failure/cancel.
         """
         if not _HAS_WS:
-            self._log(t("relay_need_ws"))
+            self._emit("relay_need_ws")
             return None
 
         for attempt in range(RECONNECT_MAX_RETRIES + 1):
@@ -929,8 +1000,8 @@ class VPSRelayReceiver:
                     RECONNECT_BASE_DELAY * 2 ** (attempt - 1),
                     RECONNECT_MAX_DELAY,
                 )
-                self._log(t("relay_reconnecting",
-                            delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES))
+                self._emit("relay_reconnecting",
+                           delay=f"{delay:.0f}", attempt=attempt, max=RECONNECT_MAX_RETRIES)
                 time.sleep(delay)
                 if self._cancelled:
                     return None
@@ -944,14 +1015,14 @@ class VPSRelayReceiver:
                 if not self._retryable or self._cancelled:
                     return None   # permanent failure
                 # retryable → continue loop
-                self._log(t("relay_connection_lost"))
+                self._emit("relay_connection_lost")
             except Exception as exc:
-                self._log(t("transfer_error_generic", error=str(exc)))
+                self._emit("transfer_error_generic", error=str(exc))
                 log.exception("VPSRelayReceiver error")
             finally:
                 self._close()
 
-        self._log(t("relay_retries_exhausted"))
+        self._emit("relay_retries_exhausted")
         return None
 
     def _receive_attempt(self, is_reconnect: bool = False) -> Optional[Path]:
@@ -962,25 +1033,25 @@ class VPSRelayReceiver:
         """
         # ── 1. Connect to VPS ─────────────────────────────────────
         if is_reconnect:
-            self._log(t("relay_reconnecting_to"))
+            self._emit("relay_reconnecting_to")
         else:
-            self._log(t("relay_connecting_to"))
+            self._emit("relay_connecting_to")
         try:
             self._ws = websocket.WebSocket()
             self._ws.connect(VPS_RELAY_URL, timeout=30)
             self._ws.settimeout(300)
             self._ws.send(self._code)
         except Exception as exc:
-            self._log(t("relay_connect_error", error=str(exc)))
+            self._emit("relay_connect_error", error=str(exc))
             # DNS failures are transient — always allow retry
             self._retryable = is_reconnect or _is_dns_error(exc)
             return None
 
-        self._log(t("relay_waiting_sender"))
+        self._emit("relay_waiting_sender")
 
         # ── 2. Key exchange ───────────────────────────────────────
         self._crypto, peer_token = _do_key_exchange(
-            self._ws, self._code, self.on_status,
+            self._ws, self._code, self._emit,
             reconnect_token=self._reconnect_token,
         )
         if not self._crypto:
@@ -1003,7 +1074,7 @@ class VPSRelayReceiver:
 
         if not _do_verification(
             self._ws, self._crypto, sig_key,
-            self.on_verify, self.on_status,
+            self.on_verify, self._emit,
             auto_verify=auto_verify,
         ):
             return None  # permanent failure (verification rejected)
@@ -1011,7 +1082,7 @@ class VPSRelayReceiver:
         self._reconnect_token = new_token
 
         # ── 4. Receive file ───────────────────────────────────────
-        self._log(t("relay_waiting_meta"))
+        self._emit("relay_waiting_meta")
         self._ws.settimeout(120)
 
         file_name:      Optional[str]  = None
@@ -1092,24 +1163,24 @@ class VPSRelayReceiver:
                         # ── Security: sanitize file name (path traversal) ─
                         file_name = _safe_file_name(raw_name)
                         if file_name is None:
-                            self._log(t("relay_unsafe_filename"))
+                            self._emit("relay_unsafe_filename")
                             return None
                         # Defense-in-depth: verify resolved path stays in save_dir
                         _resolved = (self._save_dir / file_name).resolve()
                         if not str(_resolved).startswith(
                             str(self._save_dir.resolve())
                         ):
-                            self._log(t("relay_path_traversal"))
+                            self._emit("relay_path_traversal")
                             return None
 
                         # ── Security: validate file size ──────────────────
                         if not isinstance(file_size, int) or file_size <= 0:
-                            self._log(t("relay_invalid_filesize"))
+                            self._emit("relay_invalid_filesize")
                             return None
                         if file_size > VPS_MAX_FILE_SIZE:
-                            self._log(t("relay_file_too_large",
-                                        size=f"{file_size / (1024**3):.1f}",
-                                        limit=f"{VPS_MAX_FILE_SIZE / (1024**3):.0f}"))
+                            self._emit("relay_file_too_large",
+                                       size=f"{file_size / (1024**3):.1f}",
+                                       limit=f"{VPS_MAX_FILE_SIZE / (1024**3):.0f}")
                             return None
 
                         # ── Security: validate chunk_size / total_chunks ──
@@ -1152,15 +1223,15 @@ class VPSRelayReceiver:
                             try:
                                 out_file = open(temp_path, "r+b")
                             except Exception as exc:
-                                self._log(t("relay_part_open_error", error=str(exc)))
+                                self._emit("relay_part_open_error", error=str(exc))
                                 is_resume = False
                                 received_seqs = set()
                                 bytes_received = 0
 
                             if is_resume:
-                                self._log(t("relay_resume_found",
-                                            received=len(received_seqs), total=total_chunks,
-                                            mb=f"{bytes_received / (1024**2):.1f}"))
+                                self._emit("relay_resume_found",
+                                           received=len(received_seqs), total=total_chunks,
+                                           mb=f"{bytes_received / (1024**2):.1f}")
 
                         if not is_resume:
                             received_seqs = set()
@@ -1173,7 +1244,7 @@ class VPSRelayReceiver:
                                     out_file.flush()
                                     out_file.seek(0)
                             except Exception as exc:
-                                self._log(t("relay_file_create_error", error=str(exc)))
+                                self._emit("relay_file_create_error", error=str(exc))
                                 return None
 
                         writer_thread = threading.Thread(
@@ -1184,10 +1255,10 @@ class VPSRelayReceiver:
                         size_str = human_size(file_size)
                         if is_resume:
                             pct = bytes_received / file_size * 100 if file_size else 0
-                            self._log(t("relay_receiving_resume",
-                                        filename=file_name, size=size_str, pct=f"{pct:.0f}"))
+                            self._emit("relay_receiving_resume",
+                                       filename=file_name, size=size_str, pct=f"{pct:.0f}")
                         else:
-                            self._log(t("relay_receiving", filename=file_name, size=size_str))
+                            self._emit("relay_receiving", filename=file_name, size=size_str)
 
                         ack_msg: dict = {"type": "relay_meta_ack"}
                         if is_resume and received_seqs:
@@ -1226,7 +1297,7 @@ class VPSRelayReceiver:
                                     "type":    "relay_retransmit",
                                     "missing": batch,
                                 }).encode())
-                            self._log(t("relay_request_retransmit", count=len(missing)))
+                            self._emit("relay_request_retransmit", count=len(missing))
 
                         else:
                             write_queue.put(None)
@@ -1239,7 +1310,7 @@ class VPSRelayReceiver:
                             except Exception:
                                 pass
 
-                            self._log(t("relay_verifying_sha"))
+                            self._emit("relay_verifying_sha")
                             verified = _sha256_file(temp_path) == file_hash
 
                             self._send_ctl(json.dumps({
@@ -1252,16 +1323,16 @@ class VPSRelayReceiver:
                                 _delete_manifest(self._save_dir, file_name)
                                 final_path = _unique_path(save_path)
                                 if final_path != save_path:
-                                    self._log(t("relay_file_renamed", filename=final_path.name))
+                                    self._emit("relay_file_renamed", filename=final_path.name)
                                     save_path = final_path
                                 temp_path.rename(save_path)
                                 elapsed = time.monotonic() - t0
                                 avg = file_size / elapsed if elapsed > 0 else 0
-                                self._log(t("relay_saved",
-                                            filename=save_path.name, speed=f"{avg / (1024*1024):.1f}"))
+                                self._emit("relay_saved",
+                                           filename=save_path.name, speed=f"{avg / (1024*1024):.1f}")
                                 return save_path
                             else:
-                                self._log(t("relay_hash_mismatch_recv"))
+                                self._emit("relay_hash_mismatch_recv")
                                 _delete_manifest(self._save_dir, file_name)
                                 temp_path.unlink(missing_ok=True)
                                 return None
@@ -1310,7 +1381,7 @@ class VPSRelayReceiver:
                         last_prog = now
 
         except Exception as exc:
-            self._log(t("transfer_error_generic", error=str(exc)))
+            self._emit("transfer_error_generic", error=str(exc))
             log.exception("VPSRelayReceiver error")
             if file_name and received_seqs:
                 self._retryable = True
@@ -1332,8 +1403,8 @@ class VPSRelayReceiver:
                 file_name and transfer_id and received_seqs
                 and len(received_seqs) < total_chunks
             ):
-                self._log(t("relay_progress_saved",
-                            received=len(received_seqs), total=total_chunks))
+                self._emit("relay_progress_saved",
+                           received=len(received_seqs), total=total_chunks)
                 _save_manifest(
                     _manifest_path(self._save_dir, file_name),
                     transfer_id, file_name, file_size,
@@ -1357,8 +1428,3 @@ class VPSRelayReceiver:
                 self._ws.close()
         except Exception:
             pass
-
-    def _log(self, msg: str) -> None:
-        log.info("[Receiver] %s", msg)
-        if self.on_status:
-            self.on_status(msg)
