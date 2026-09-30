@@ -91,16 +91,20 @@ def test_nothing_important_is_clipped(app, size):
     assert app.status_box.winfo_height() >= 30
 
 
-def test_log_box_takes_extra_height(app):
-    # The screen may limit how tall the window can get (CI runners are small),
-    # so compare relative growth: all extra window height goes to the log box.
+def test_only_the_log_box_absorbs_height_changes(app):
+    # Shrink from the default to the minimum size (fits on any screen, incl.
+    # small CI displays): the whole difference must come out of the log box.
+    import tkinter
     pump(app, timeout=0.3)
     win_before, log_before = app.winfo_height(), app.status_box.winfo_height()
-    app.geometry(f"580x{min(900, app.winfo_screenheight() - 80)}")
+    tabs_before = app.tabs.winfo_height()
+    w, h = tkinter.Tk.wm_minsize(app)
+    app.geometry(f"{w}x{h}")
     pump(app, timeout=0.4)
-    grew = app.winfo_height() - win_before
-    assert grew > 20, "window could not be enlarged"
-    assert app.status_box.winfo_height() - log_before >= grew - 2
+    shrunk = win_before - app.winfo_height()
+    assert shrunk > 20, "window did not shrink"
+    assert log_before - app.status_box.winfo_height() >= shrunk - 2
+    assert app.tabs.winfo_height() == tabs_before
 
 
 def test_copy_log_puts_text_on_clipboard(app):
