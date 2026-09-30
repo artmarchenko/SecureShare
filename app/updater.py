@@ -6,8 +6,12 @@ verifies, and installs updates with automatic rollback on failure.
 
 Security model:
   1. HTTPS transport to GitHub (TLS protects against MITM)
-  2. File size verified against GitHub API metadata (prevents truncation)
-  3. SHA-256 checksum verified against SHA256SUMS.txt release asset
+  2. SHA256SUMS.txt must carry a valid Ed25519 signature from a key built
+     into the app (TRUSTED_RELEASE_KEYS) — a compromised GitHub account or
+     CDN cannot publish an update the app will install
+  3. The archive must be listed in the signed SHA256SUMS.txt and match it
+     (fail-closed: missing checksums or signature → no auto-install)
+  4. File size verified against GitHub API metadata (prevents truncation)
   4. Archive contents validated (path traversal, single expected file)
   5. Binary header verified (PE for Windows, ELF for Linux)
   6. Binary size sanity check (1 MB – 200 MB)
@@ -27,6 +31,7 @@ Features:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -44,6 +49,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from .config import APP_VERSION
 from .i18n import t
 
@@ -59,6 +67,15 @@ CHECK_COOLDOWN = 24 * 3600   # 24 hours between automatic checks
 REQUEST_TIMEOUT = 10          # seconds for API calls
 DOWNLOAD_TIMEOUT = 300        # seconds for file download
 DOWNLOAD_CHUNK = 64 * 1024   # 64 KB read chunks
+
+# Ed25519 public keys allowed to sign SHA256SUMS.txt (base64, raw 32 bytes).
+# The primary key's private half lives only in the RELEASE_SIGNING_KEY GitHub
+# secret; the backup's private half is kept offline by the maintainer, so the
+# primary can be replaced without breaking auto-update for installed clients.
+TRUSTED_RELEASE_KEYS: tuple[str, ...] = (
+    "F2Mak3BZAEs1C/2iMZx3Zs5bTQsOzPm0xN6M6zzORZw=",   # primary (CI)
+    "xTCOMQzw5gL+D0noVQPCs2laK8kFB+TjJM9cp1GtWEA=",   # backup (offline)
+)
 _TEMP_PREFIX = "secureshare_update_"
 
 # Binary size sanity bounds
@@ -169,6 +186,7 @@ class ReleaseInfo:
     linux_download: str = ""   # direct .tar.gz URL (Linux)
     linux_size: int = 0        # expected size from GitHub API
     checksums_url: str = ""    # SHA256SUMS.txt asset URL
+    signature_url: str = ""    # SHA256SUMS.txt.sig asset URL
     _assets_raw: list = field(default_factory=list, repr=False)
 
 
@@ -210,6 +228,7 @@ def fetch_latest_release() -> Optional[ReleaseInfo]:
     linux_download = ""
     linux_size = 0
     checksums_url = ""
+    signature_url = ""
 
     for asset in data.get("assets", []):
         aname = asset.get("name", "")
@@ -218,6 +237,8 @@ def fetch_latest_release() -> Optional[ReleaseInfo]:
 
         if aname == "SHA256SUMS.txt":
             checksums_url = url
+        elif aname == "SHA256SUMS.txt.sig":
+            signature_url = url
         elif aname.endswith(".zip") and "linux" not in aname.lower():
             if tag in aname or not win_download:
                 win_download = url
@@ -239,6 +260,7 @@ def fetch_latest_release() -> Optional[ReleaseInfo]:
         linux_download=linux_download,
         linux_size=linux_size,
         checksums_url=checksums_url,
+        signature_url=signature_url,
     )
 
 
@@ -344,24 +366,20 @@ def _verify_binary(path: Path) -> tuple[bool, str]:
 #  SHA-256 checksum verification
 # ══════════════════════════════════════════════════════════════════
 
-def _fetch_checksums(url: str) -> dict[str, str]:
-    """Download SHA256SUMS.txt and parse it.
-
-    Returns dict { filename: sha256_hex }.
-    """
+def _fetch_bytes(url: str) -> Optional[bytes]:
     if not url:
-        return {}
+        return None
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": f"SecureShare/{APP_VERSION}"},
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": f"SecureShare/{APP_VERSION}"})
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-            text = resp.read().decode("utf-8")
+            return resp.read()
     except Exception as exc:
-        log.debug("Failed to fetch checksums: %s", exc)
-        return {}
+        log.debug("Failed to fetch %s: %s", url, exc)
+        return None
 
+
+def _parse_checksums(text: str) -> dict[str, str]:
+    """Parse SHA256SUMS.txt into { filename: sha256_hex }."""
     result: dict[str, str] = {}
     for line in text.strip().splitlines():
         line = line.strip()
@@ -375,6 +393,28 @@ def _fetch_checksums(url: str) -> dict[str, str]:
             fname = fname.replace("\\", "/").split("/")[-1]
             result[fname] = sha.lower()
     return result
+
+
+def _fetch_checksums(url: str) -> dict[str, str]:
+    """Download SHA256SUMS.txt and parse it (unauthenticated — see signature)."""
+    data = _fetch_bytes(url)
+    return _parse_checksums(data.decode("utf-8", errors="replace")) if data else {}
+
+
+def verify_checksums_signature(sums: bytes, signature_b64: str) -> bool:
+    """True if `signature_b64` is a valid Ed25519 signature of `sums` by one
+    of TRUSTED_RELEASE_KEYS."""
+    try:
+        signature = base64.b64decode(signature_b64.strip(), validate=True)
+    except Exception:
+        return False
+    for key_b64 in TRUSTED_RELEASE_KEYS:
+        try:
+            Ed25519PublicKey.from_public_bytes(base64.b64decode(key_b64)).verify(signature, sums)
+            return True
+        except (InvalidSignature, ValueError):
+            continue
+    return False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -535,12 +575,13 @@ def download_and_verify(
 
     Security checks performed:
       1. HTTPS transport (GitHub CDN)
-      2. Downloaded file size matches GitHub API metadata
-      3. SHA-256 matches SHA256SUMS.txt release asset (if available)
-      4. Archive has no path traversal entries
-      5. Archive contains exactly one expected file
-      6. Extracted binary has valid PE/ELF header
-      7. Extracted binary size is within sane bounds
+      2. SHA256SUMS.txt signed by a trusted release key (required)
+      3. Archive listed in it and its SHA-256 matches (required)
+      4. Downloaded file size matches GitHub API metadata
+      5. Archive has no path traversal entries
+      6. Archive contains exactly one expected file
+      7. Extracted binary has valid PE/ELF header
+      8. Extracted binary size is within sane bounds
 
     Returns (path_to_verified_binary, error_message).
     On failure the temporary download directory is removed; on success it
@@ -592,16 +633,21 @@ def _download_into(
     archive_path = temp_dir / f"update{suffix}"
 
     try:
-        # ── 2. Download SHA256SUMS.txt (if available) ─────────────
-        expected_sha256 = ""
-        if release.checksums_url:
-            _status(t("updater_downloading_checksums"))
-            checksums = _fetch_checksums(release.checksums_url)
-            if archive_filename and archive_filename in checksums:
-                expected_sha256 = checksums[archive_filename]
-                _status(t("updater_sha_expected", sha=expected_sha256[:16]))
-            else:
-                _status(t("updater_sha_missing"))
+        # ── 2. Signed checksums (required) ────────────────────────
+        _status(t("updater_downloading_checksums"))
+        sums = _fetch_bytes(release.checksums_url)
+        signature = _fetch_bytes(release.signature_url)
+        if not sums or not signature:
+            return None, ("This release has no signed checksums, so it cannot be "
+                          "installed automatically. Please download it manually.")
+        if not verify_checksums_signature(sums, signature.decode("ascii", errors="replace")):
+            return None, ("The release signature is invalid — the update may have been "
+                          "tampered with and was not installed.")
+        checksums = _parse_checksums(sums.decode("utf-8", errors="replace"))
+        expected_sha256 = checksums.get(archive_filename) if archive_filename else None
+        if not expected_sha256:
+            return None, f"{archive_filename or 'The archive'} is not listed in the signed checksums."
+        _status(t("updater_sha_expected", sha=expected_sha256[:16]))
 
         # ── 3. Download archive ───────────────────────────────────
         _status(t("updater_downloading"))
@@ -638,18 +684,15 @@ def _download_into(
                 f"got {actual_size:,} bytes"
             )
 
-        # ── 5. Verify SHA-256 ─────────────────────────────────────
-        if expected_sha256:
-            if actual_sha256 != expected_sha256:
-                return None, (
-                    f"SHA-256 mismatch!\n"
-                    f"  Expected: {expected_sha256}\n"
-                    f"  Got:      {actual_sha256}\n"
-                    f"The download may have been tampered with."
-                )
-            _status("SHA-256 verified")
-        else:
-            _status(f"SHA-256: {actual_sha256} (no reference to verify against)")
+        # ── 5. Verify SHA-256 against the signed list ─────────────
+        if actual_sha256 != expected_sha256:
+            return None, (
+                f"SHA-256 mismatch!\n"
+                f"  Expected: {expected_sha256}\n"
+                f"  Got:      {actual_sha256}\n"
+                f"The download may have been tampered with."
+            )
+        _status("SHA-256 verified (signed checksums)")
 
         # ── 6. Extract archive ────────────────────────────────────
         _status(t("updater_extracting"))

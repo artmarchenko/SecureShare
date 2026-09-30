@@ -296,6 +296,18 @@ jobs:
           echo "=== SHA256SUMS.txt ==="
           cat SHA256SUMS.txt
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sign SHA256SUMS.txt (Ed25519) — required by the auto-updater
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          pip install "cryptography>=46.0.5"
+          # fails if the secret is missing or not one of the keys built into the app
+          python scripts/release_signing.py sign dist/SHA256SUMS.txt
+
       - name: Generate release notes
         id: notes
         run: |
@@ -323,7 +335,7 @@ jobs:
             echo "| Windows | \`SecureShare-$TAG.zip\` | Extract and run — no installation needed |"
             echo "| Linux | \`SecureShare-$TAG-linux-x64.tar.gz\` | \`tar xzf SecureShare-*.tar.gz && chmod +x SecureShare && ./SecureShare\` |"
             echo ""
-            echo "### SHA-256 Checksums"
+            echo "### SHA-256 Checksums (signed: \`SHA256SUMS.txt.sig\`, verify with \`python scripts/release_signing.py verify SHA256SUMS.txt SHA256SUMS.txt.sig\`)"
             echo "\`\`\`"
             echo "$CHECKSUMS"
             echo "\`\`\`"
@@ -351,6 +363,7 @@ jobs:
             dist/SecureShare.zip
             dist/SecureShare-linux-x64.tar.gz
             dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
