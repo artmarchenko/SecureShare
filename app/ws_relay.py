@@ -96,6 +96,7 @@ from .config import (
     RECONNECT_MAX_DELAY,
 )
 from .i18n import t
+from .format import human_size
 from .crypto_utils import (
     CryptoSession,
     derive_signaling_key,
@@ -146,7 +147,7 @@ def _make_transfer_id(name: str, size: int, sha256: str) -> str:
 
 # ── Reconnect token ──────────────────────────────────────────────
 
-def _make_reconnect_token(shared_key: bytes, session_code: str) -> str:
+def _make_reconnect_token(crypto: CryptoSession, session_code: str) -> str:
     """Derive a reconnect token from the DH shared key.
 
     Both peers compute the same token after key exchange.  On
@@ -154,11 +155,7 @@ def _make_reconnect_token(shared_key: bytes, session_code: str) -> str:
     proves that the peer participated in the original session
     → verification popup can be safely skipped.
     """
-    raw = hmac.new(
-        shared_key,
-        session_code.encode() + b"secureshare-reconnect-v1",
-        hashlib.sha256,
-    ).digest()[:16]
+    raw = crypto.mac(session_code.encode() + b"secureshare-reconnect-v1")[:16]
     return base64.b64encode(raw).decode()
 
 
@@ -629,9 +626,7 @@ class VPSRelaySender:
             return None if is_reconnect else False
 
         # Compute reconnect token from NEW shared key
-        new_token = _make_reconnect_token(
-            self._crypto._shared_key, self._code
-        )
+        new_token = _make_reconnect_token(self._crypto, self._code)
 
         # ── 3. Verification ───────────────────────────────────────
         sig_key = derive_signaling_key(self._code)
@@ -704,8 +699,7 @@ class VPSRelaySender:
                         mb=f"{resume_bytes / (1024**2):.1f}"))
 
         # ── 6. Send file chunks ───────────────────────────────────
-        from .gui import _human_size
-        size_str = _human_size(file_size)
+        size_str = human_size(file_size)
         chunks_to_send = total_chunks - len(skip_chunks)
         if skip_chunks:
             self._log(t("relay_sending_resume",
@@ -993,9 +987,7 @@ class VPSRelayReceiver:
             self._retryable = is_reconnect
             return None
 
-        new_token = _make_reconnect_token(
-            self._crypto._shared_key, self._code
-        )
+        new_token = _make_reconnect_token(self._crypto, self._code)
 
         # ── 3. Verification ───────────────────────────────────────
         sig_key = derive_signaling_key(self._code)
@@ -1189,8 +1181,7 @@ class VPSRelayReceiver:
                         )
                         writer_thread.start()
 
-                        from .gui import _human_size
-                        size_str = _human_size(file_size)
+                        size_str = human_size(file_size)
                         if is_resume:
                             pct = bytes_received / file_size * 100 if file_size else 0
                             self._log(t("relay_receiving_resume",

@@ -115,3 +115,11 @@ def test_signaling_wrong_code_is_rejected():
     ct = signaling_encrypt(derive_signaling_key(CODE), b"hello")
     with pytest.raises(InvalidTag):
         signaling_decrypt(derive_signaling_key("zz99-yy88"), ct)
+
+
+def test_mac_is_shared_and_requires_key():
+    a, b = paired()
+    assert a.mac(b"x") == b.mac(b"x") and len(a.mac(b"x")) == 32
+    assert a.mac(b"x") != a.mac(b"y")
+    with pytest.raises(ValueError):
+        CryptoSession(CODE).mac(b"x")

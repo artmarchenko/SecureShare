@@ -82,8 +82,8 @@ def test_change_callbacks_are_called(lang):
 @pytest.fixture
 def fmt(lang):
     lang.set_language("en", save=False)
-    from app import gui
-    return gui
+    from app import format as fmt_module
+    return fmt_module
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -93,7 +93,7 @@ def fmt(lang):
     (5 * 1024 ** 3, "5.0 GB"),
 ])
 def test_human_size(fmt, value, expected):
-    assert fmt._human_size(value) == expected
+    assert fmt.human_size(value) == expected
 
 
 @pytest.mark.parametrize("seconds,expected", [
@@ -104,11 +104,12 @@ def test_human_size(fmt, value, expected):
     (10 ** 7, "—"),
 ])
 def test_human_eta(fmt, seconds, expected):
-    assert fmt._human_eta(seconds) == expected
+    assert fmt.human_eta(seconds) == expected
 
 
-def test_generated_session_code_format(fmt):
+def test_generated_session_code_format():
     import re
-    codes = {fmt._generate_code() for _ in range(200)}
+    from app import gui
+    codes = {gui._generate_code() for _ in range(200)}
     assert len(codes) == 200
     assert all(re.fullmatch(r"[a-z0-9]{4}-[a-z0-9]{4}", c) for c in codes)
