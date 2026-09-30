@@ -92,11 +92,15 @@ def test_nothing_important_is_clipped(app, size):
 
 
 def test_log_box_takes_extra_height(app):
+    # The screen may limit how tall the window can get (CI runners are small),
+    # so compare relative growth: all extra window height goes to the log box.
     pump(app, timeout=0.3)
-    before = app.status_box.winfo_height()
-    app.geometry("580x900")
+    win_before, log_before = app.winfo_height(), app.status_box.winfo_height()
+    app.geometry(f"580x{min(900, app.winfo_screenheight() - 80)}")
     pump(app, timeout=0.4)
-    assert app.status_box.winfo_height() > before + 100
+    grew = app.winfo_height() - win_before
+    assert grew > 20, "window could not be enlarged"
+    assert app.status_box.winfo_height() - log_before >= grew - 2
 
 
 def test_copy_log_puts_text_on_clipboard(app):
