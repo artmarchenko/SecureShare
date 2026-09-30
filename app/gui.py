@@ -39,7 +39,7 @@ from .config import (
     VPS_RELAY_URL,
 )
 from .format import human_eta, human_size, human_speed
-from .ws_relay import VPSRelaySender, VPSRelayReceiver
+from .ws_relay import TransferState, VPSRelaySender, VPSRelayReceiver
 from .updater import (
     check_for_update, skip_version, clear_skipped, ReleaseInfo,
     can_auto_update, download_and_verify, get_update_blocked_reason,
@@ -1598,32 +1598,9 @@ class App(ctk.CTk):
             return False
         return result[0]
 
-    # ════════════════════════════════════════════════════════════════
-    #  Status callback adapter for ws_relay → GUI state indicator
-    # ════════════════════════════════════════════════════════════════
-
-    def _make_status_cb(self):
-        """Return a status callback that updates both the log and the state indicator."""
-        def _on_status(msg: str):
-            self._log(msg)
-            # Detect state from emoji prefixes (language-independent)
-            if "🌐" in msg:  # 🌐
-                self._set_state(self.STATE_CONNECTING)
-            elif "🔑" in msg and "..." in msg:  # 🔑 + ...
-                self._set_state(self.STATE_KEY_EXCHANGE)
-            elif "🔑" in msg:  # 🔑
-                self._set_state(self.STATE_VERIFYING)
-            elif "⏳" in msg:  # ⏳
-                self._set_state(self.STATE_WAITING)
-            elif "📦" in msg or ("📥" in msg and ":" in msg):  # 📦 or 📥:
-                self._set_state(self.STATE_TRANSFERRING)
-            elif "🎉" in msg:  # 🎉
-                self._set_state(self.STATE_DONE)
-            elif "✅" in msg and "/" in msg:  # ✅ x/y
-                self._set_state(self.STATE_DONE)
-            elif "❌" in msg:  # ❌
-                self._set_state(self.STATE_ERROR)
-        return _on_status
+    def _on_transfer_state(self, state: TransferState) -> None:
+        """ws_relay reports the transfer phase; mirror it in the indicator."""
+        self._set_state(state.value)
 
     # ════════════════════════════════════════════════════════════════
     #  SEND workflow
@@ -1677,7 +1654,8 @@ class App(ctk.CTk):
                 session_code=code,
                 filepath=filepath,
                 on_progress=self._set_progress,
-                on_status=self._make_status_cb(),
+                on_status=self._log,
+                on_state=self._on_transfer_state,
                 on_verify=self._verify_connection,
             )
             self._current_transfer = sender
@@ -1762,7 +1740,8 @@ class App(ctk.CTk):
                 session_code=code,
                 save_dir=save_dir,
                 on_progress=self._set_progress,
-                on_status=self._make_status_cb(),
+                on_status=self._log,
+                on_state=self._on_transfer_state,
                 on_verify=self._verify_connection,
             )
             self._current_transfer = receiver

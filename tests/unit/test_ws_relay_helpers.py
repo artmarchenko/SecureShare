@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import time
+from pathlib import Path
 
 import pytest
 
@@ -191,3 +192,38 @@ def test_unique_path(tmp_path):
     noext = tmp_path / "README"
     noext.write_bytes(b"x")
     assert _unique_path(noext).name == "README (1)"
+
+
+# ── Typed transfer states (A2) ──────────────────────────────────────
+
+def _lang(code):
+    path = Path(__file__).resolve().parents[2] / "app" / "lang" / f"{code}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("_meta", None)
+    return data
+
+
+def test_state_table_only_uses_existing_messages():
+    from app.ws_relay import _STATE_FOR_MESSAGE
+    for code in ("uk", "en", "de"):
+        missing = set(_STATE_FOR_MESSAGE) - set(_lang(code))
+        assert not missing, (code, missing)
+
+
+def test_every_error_message_is_mapped_to_error():
+    # Guard: a new "❌ ..." relay message must also switch the indicator to ERROR.
+    from app.ws_relay import _STATE_FOR_MESSAGE, TransferState
+    for key, text in _lang("en").items():
+        if key.startswith("relay_") and "❌" in text:
+            assert _STATE_FOR_MESSAGE.get(key) is TransferState.ERROR, key
+
+
+def test_emit_reports_text_and_state():
+    from app.ws_relay import TransferState, VPSRelayReceiver
+    texts, states = [], []
+    r = VPSRelayReceiver("ab12-cd34", ".", on_status=texts.append, on_state=states.append)
+    r._emit("relay_connecting_to")
+    r._emit("relay_resume_found", received=1, total=2, mb="0.5")   # informational
+    r._emit("relay_saved", filename="a.txt", speed="1.0")
+    assert len(texts) == 3
+    assert states == [TransferState.CONNECTING, TransferState.DONE]
