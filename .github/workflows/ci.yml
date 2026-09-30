@@ -17,6 +17,10 @@ on:
       - "requirements.txt"
       - "server/relay_server.py"
       - "server/analytics.py"
+      - "server/www/**"
+      - "scripts/**"
+      - "version_info.txt"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
     paths:
@@ -26,6 +30,10 @@ on:
       - "requirements.txt"
       - "server/relay_server.py"
       - "server/analytics.py"
+      - "server/www/**"
+      - "scripts/**"
+      - "version_info.txt"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:  # manual trigger for testing
 
 jobs:
@@ -64,6 +72,12 @@ jobs:
 
       - name: Lint server code
         run: flake8 server/relay_server.py
+
+      - name: Lint scripts
+        run: flake8 scripts/
+
+      - name: Regression guard (versions, i18n, server invariants)
+        run: python scripts/regression_guard.py
 
       - name: Import check
         run: |

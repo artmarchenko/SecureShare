@@ -129,7 +129,7 @@
   "help_recv_title": "📥  Datei empfangen",
   "help_recv_body": "1.  Öffne den Tab «Empfangen»\n2.  Gib den Sitzungscode des Absenders ein\n3.  Wähle einen Speicherordner\n4.  Klicke «Empfangen»\n5.  Bestätige den Verifizierungscode\n6.  Die Datei wird im angegebenen Ordner gespeichert",
   "help_verify_title": "🔑  Verifizierungscode",
-  "help_verify_body": "Nach der Verbindung zeigen beide Geräte\ndenselben 8-stelligen Code (XXXX-XXXX) an.\n\n✅ Codes stimmen überein → klicke „Codes stimmen überein"\n❌ Codes unterschiedlich → klicke „Abbrechen" und versuche es erneut\n\nDies schützt vor Man-in-the-Middle-Angriffen (MITM).",
+  "help_verify_body": "Nach der Verbindung zeigen beide Geräte\ndenselben 8-stelligen Code (XXXX-XXXX) an.\n\n✅ Codes stimmen überein → klicke „Codes stimmen überein“\n❌ Codes unterschiedlich → klicke „Abbrechen“ und versuche es erneut\n\nDies schützt vor Man-in-the-Middle-Angriffen (MITM).",
   "help_security_title": "🔒  Sicherheit",
   "help_security_body": "•  Verschlüsselung: AES-256-GCM (Ende-zu-Ende)\n•  Schlüsselaustausch: X25519 (Diffie-Hellman)\n•  Der Server sieht NIEMALS deine Daten\n•  Sitzungscode ist einmalig verwendbar",
   "help_limits_title": "⚠️  Einschränkungen",

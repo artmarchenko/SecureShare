@@ -42,3 +42,6 @@ PENTEST_SCOPE.md
 OSSRequestForm*.xlsx
 CREDENTIALS.md
 MARKETING.md
+
+# Claude Code personal settings
+.claude/settings.local.json

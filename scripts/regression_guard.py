@@ -12,8 +12,9 @@ Run:
 
 from __future__ import annotations
 
+import json
 import re
-import sys
+import string
 from pathlib import Path
 
 
@@ -154,11 +155,54 @@ def check_web_i18n_invariants() -> None:
         raise AssertionError(f"server/www/i18n.js: DE missing keys used in index.html: {missing_de[:10]}")
 
 
+def _placeholders(template: str) -> set[str]:
+    return {name for _, name, _, _ in string.Formatter().parse(template) if name}
+
+
+def check_app_i18n() -> None:
+    lang_dir = ROOT / "app" / "lang"
+    langs: dict[str, dict] = {}
+    for path in sorted(lang_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise AssertionError(f"app/lang/{path.name}: invalid JSON: {exc}")
+        data.pop("_meta", None)
+        if not data:
+            raise AssertionError(f"app/lang/{path.name}: no translation keys")
+        langs[path.stem] = data
+
+    for required in ("uk", "en", "de"):
+        if required not in langs:
+            raise AssertionError(f"app/lang/{required}.json is missing")
+
+    reference = langs["uk"]
+    for code, data in langs.items():
+        missing = sorted(set(reference) - set(data))
+        extra = sorted(set(data) - set(reference))
+        if missing or extra:
+            raise AssertionError(
+                f"app/lang/{code}.json: missing keys {missing[:10]}, extra keys {extra[:10]}"
+            )
+        for key, text in data.items():
+            try:
+                ours = _placeholders(text)
+                ref = _placeholders(reference[key])
+            except ValueError as exc:
+                raise AssertionError(f"app/lang/{code}.json: bad format string in '{key}': {exc}")
+            if ours != ref:
+                raise AssertionError(
+                    f"app/lang/{code}.json: placeholders in '{key}' are {sorted(ours)}, "
+                    f"expected {sorted(ref)} (as in uk.json)"
+                )
+
+
 def main() -> int:
     checks = [
         ("version-sync", check_version_sync),
         ("server-invariants", check_server_invariants),
         ("web-i18n-invariants", check_web_i18n_invariants),
+        ("app-i18n", check_app_i18n),
     ]
 
     failed = []
