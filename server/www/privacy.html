@@ -74,14 +74,14 @@
 <body>
   <div class="container">
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: February 22, 2026</p>
+    <p class="updated">Last updated: October 1, 2026</p>
 
     <h2>Overview</h2>
-    <p>SecureShare is an <strong>open-source, peer-to-peer file sharing application</strong> designed with privacy as a core principle. We collect the absolute minimum data necessary to operate the service.</p>
+    <p>SecureShare is an <strong>open-source, end-to-end encrypted file transfer application</strong> designed with privacy as a core principle. Files travel through our relay server as ciphertext only. We collect the absolute minimum data necessary to operate the service.</p>
 
     <h2>What We Do NOT Collect</h2>
     <ul>
-      <li><strong>File contents</strong> — all transfers are end-to-end encrypted. The relay server never sees your data.</li>
+      <li><strong>File contents and file names</strong> — all transfers are end-to-end encrypted. The relay server only forwards ciphertext and never sees your data.</li>
       <li><strong>File names or metadata</strong> — not logged, not stored.</li>
       <li><strong>Session codes</strong> — not logged on the server.</li>
       <li><strong>User accounts</strong> — there are none. No registration, no login.</li>
@@ -94,7 +94,8 @@
     <ul>
       <li><strong>Relay statistics:</strong> total number of sessions, bytes relayed, session durations (aggregated, not per-user).</li>
       <li><strong>App version &amp; OS type:</strong> to know which platforms need support.</li>
-      <li><strong>Crash reports:</strong> when the app crashes, an anonymous report (error type, traceback, app version, OS) may be sent automatically. No personal data is included.</li>
+      <li><strong>Crash reports (on by default, can be switched off):</strong> when the app crashes, an anonymous report (error type, traceback with your home folder removed, app version, OS, RAM/CPU count) is sent to our relay server. No file names, file contents, session codes or IP addresses are included in the report. You can turn this off in the app under <em>Diagnostics → Privacy → Send anonymous crash reports</em>.</li>
+      <li><strong>Transfer statistics (off by default, opt-in):</strong> if you enable <em>Diagnostics → Privacy → Send anonymous transfer statistics</em>, the app reports the outcome of each transfer (success / error / cancelled), a file-size range (e.g. "10-100MB", never the exact size), duration, app version and OS.</li>
       <li><strong>Landing page analytics:</strong> page views, referrer domains (not full URLs), selected language, screen size bucket (mobile/tablet/desktop). Unique visitors are counted using a SHA-256 hash of IP + daily rotating salt — the hash is not reversible and changes every day.</li>
     </ul>
 

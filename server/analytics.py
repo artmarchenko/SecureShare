@@ -204,6 +204,30 @@ class JSONLWriter:
             log.error("JSONL read failed (%s): %s", self._base_name, exc)
             return []
 
+    def latest_record(self, is_valid, max_lines: int = 2000) -> Optional[dict]:
+        """Newest record accepted by `is_valid`, searching the current file
+        first and then older ones (previous months, rotated files).
+
+        Restores therefore survive a restart right after a month change,
+        before anything was written to the new month's file (B9).
+        """
+        files = sorted(self._data_dir.glob(f"{self._base_name}_*.jsonl"),
+                       key=lambda f: f.name, reverse=True)
+        for path in files:
+            try:
+                lines = path.read_text(encoding="utf-8").strip().splitlines()[-max_lines:]
+            except Exception as exc:
+                log.error("JSONL read failed (%s): %s", path.name, exc)
+                continue
+            for line in reversed(lines):
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict) and is_valid(record):
+                    return record
+        return None
+
     def list_files(self) -> list[str]:
         """List all JSONL files for this base name."""
         if not self._data_dir.exists():
@@ -314,18 +338,11 @@ class StatsCollector:
           - client events
         """
         try:
-            # Read a small tail window so one malformed tail line does not reset stats.
-            records = self._writer.read_recent(max_lines=2000)
-            if not records:
-                log.info("Stats: no previous data on disk — starting fresh")
-                return
-            last = None
-            for record in reversed(records):
-                if isinstance(record.get("lifetime"), dict):
-                    last = record
-                    break
-            if not isinstance(last, dict):
-                log.warning("Stats: no valid snapshot found in recent history — starting fresh")
+            # Newest valid snapshot (skips malformed lines; falls back to
+            # previous months right after a month change).
+            last = self._writer.latest_record(lambda r: isinstance(r.get("lifetime"), dict))
+            if last is None:
+                log.info("Stats: no previous snapshot on disk — starting fresh")
                 return
 
             # Restore lifetime counters
@@ -734,11 +751,10 @@ class LandingAnalytics:
         from counts — only the daily count is preserved.
         """
         try:
-            records = self._writer.read_recent(max_lines=1)
-            if not records:
+            last = self._writer.latest_record(lambda r: "total_views" in r)
+            if last is None:
                 log.info("Landing: no previous data — starting fresh")
                 return
-            last = records[-1]
 
             # Restore totals
             self._total_views = int(last.get("total_views", 0))

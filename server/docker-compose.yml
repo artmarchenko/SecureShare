@@ -38,6 +38,12 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp:size=10m
+    # Bounded container logs (default json-file logging grows without limit)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   caddy:
     image: caddy:2

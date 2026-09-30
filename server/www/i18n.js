@@ -1,7 +1,7 @@
 ﻿(function() {
   var T = {
     en: {
-      hero_subtitle: "Transfer files directly between devices with end-to-end encryption. No registration, no cloud, no traces.",
+      hero_subtitle: "Send files between devices with end-to-end encryption. No registration, no cloud storage, no copies on the server.",
       badge_no_reg: "No registration",
       badge_5gb: "Up to 5 GB",
       features_title: "Why SecureShare?",
@@ -17,7 +17,7 @@
       feat_verify_title: "Verification",
       feat_verify_desc: "Verification code ensures you\u2019re communicating with the right person. MITM attack protection.",
       feat_nocloud_title: "No cloud storage",
-      feat_nocloud_desc: "Files are transferred directly. Nothing is stored on the server \u2014 zero traces after transfer.",
+      feat_nocloud_desc: "The relay only forwards encrypted data in real time and stores nothing \u2014 no copy of your file remains after the transfer.",
       how_title: "How does it work?",
       how_sub: "Three simple steps \u2014 and your file is secure",
       step1_title: "Sender creates a session",
@@ -36,7 +36,7 @@
       sec_tls_title: "TLS 1.3 transport",
       sec_tls: "WebSocket over WSS with automatic Let\u2019s Encrypt certificate. Double layer of encryption.",
       sec_zk_title: "Zero-knowledge server",
-      sec_zk: "The relay server never sees file contents. Session codes are hashed \u2014 no content logs whatsoever.",
+      sec_zk: "The relay server never sees file contents, file names or session codes \u2014 only a room ID the code cannot be recovered from. No content logs whatsoever.",
       sec_oss_title: "Open source",
       sec_oss: "All code is available on GitHub. Review, audit, and suggest improvements.",
       cta_title: "Ready to transfer files securely?",
@@ -93,7 +93,7 @@
       footer_support: "Support"
     },
     de: {
-      hero_subtitle: "Dateien direkt zwischen Ger\u00e4ten mit Ende-zu-Ende-Verschl\u00fcsselung \u00fcbertragen. Ohne Registrierung, ohne Cloud, ohne Spuren.",
+      hero_subtitle: "Dateien zwischen Ger\u00e4ten mit Ende-zu-Ende-Verschl\u00fcsselung \u00fcbertragen. Ohne Registrierung, ohne Cloud-Speicher, ohne Kopien auf dem Server.",
       badge_no_reg: "Ohne Registrierung",
       badge_5gb: "Bis zu 5 GB",
       features_title: "Warum SecureShare?",
@@ -109,7 +109,7 @@
       feat_verify_title: "Verifizierung",
       feat_verify_desc: "Der Verifizierungscode stellt sicher, dass Sie mit der richtigen Person kommunizieren. Schutz vor MITM-Angriffen.",
       feat_nocloud_title: "Kein Cloud-Speicher",
-      feat_nocloud_desc: "Dateien werden direkt \u00fcbertragen. Nichts wird auf dem Server gespeichert \u2014 null Spuren nach der \u00dcbertragung.",
+      feat_nocloud_desc: "Der Relay leitet verschl\u00fcsselte Daten nur in Echtzeit weiter und speichert nichts \u2014 nach der \u00dcbertragung bleibt keine Kopie Ihrer Datei.",
       how_title: "Wie funktioniert es?",
       how_sub: "Drei einfache Schritte \u2014 und Ihre Datei ist sicher",
       step1_title: "Absender erstellt eine Sitzung",
@@ -128,7 +128,7 @@
       sec_tls_title: "TLS 1.3 Transport",
       sec_tls: "WebSocket \u00fcber WSS mit automatischem Let\u2019s-Encrypt-Zertifikat. Doppelte Verschl\u00fcsselungsschicht.",
       sec_zk_title: "Zero-Knowledge-Server",
-      sec_zk: "Der Relay-Server sieht niemals Dateiinhalte. Sitzungscodes werden gehasht \u2014 keinerlei Inhalts-Logs.",
+      sec_zk: "Der Relay-Server sieht weder Dateiinhalte noch Dateinamen noch Sitzungscodes \u2014 nur eine Raum-ID, aus der sich der Code nicht ableiten l\u00e4sst. Keinerlei Inhalts-Logs.",
       sec_oss_title: "Open Source",
       sec_oss: "Der gesamte Code ist auf GitHub verf\u00fcgbar. Pr\u00fcfen, auditieren und Verbesserungen vorschlagen.",
       cta_title: "Bereit, Dateien sicher zu \u00fcbertragen?",
