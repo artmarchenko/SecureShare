@@ -154,8 +154,8 @@ def test_verify_dialog_window_close_means_reject(app):
 
 def test_verify_dialog_times_out_and_closes(app, monkeypatch):
     # B5: an unanswered dialog is closed and the transfer is rejected
-    from app import gui
-    monkeypatch.setattr(gui, "VERIFY_TIMEOUT", 0.5)
+    from app.ui import verify_dialog
+    monkeypatch.setattr(verify_dialog, "VERIFY_TIMEOUT", 0.5)
     dlg, result, t = _open_verify(app)
     assert pump(app, lambda: not t.is_alive(), timeout=5)
     assert result == [False]

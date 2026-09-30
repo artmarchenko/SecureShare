@@ -30,17 +30,17 @@ def test_diagnostics_without_internet(app):
 
 
 def test_diagnostics_dns_failure(app, monkeypatch):
-    from app import gui
+    from app import diagnostics as diagnostics_window
 
     class Dummy:
         def close(self):
             pass
 
-    monkeypatch.setattr(gui.socket, "create_connection", lambda *a, **k: Dummy())
+    monkeypatch.setattr(diagnostics_window.socket, "create_connection", lambda *a, **k: Dummy())
 
     def no_dns(host):
         raise socket.gaierror("no dns")
-    monkeypatch.setattr(gui.socket, "gethostbyname", no_dns)
+    monkeypatch.setattr(diagnostics_window.socket, "gethostbyname", no_dns)
     app._run_diagnostics()
     assert pump(app, lambda: _diag_summary(app) != "", timeout=10)
     assert "1/5" in _diag_summary(app)
