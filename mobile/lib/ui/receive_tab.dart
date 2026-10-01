@@ -16,6 +16,7 @@ class ReceiveTab extends StatefulWidget {
 class _ReceiveTabState extends State<ReceiveTab> {
   final _code = TextEditingController();
   bool _invalid = false;
+  bool _fromInvite = false;
 
   @override
   void dispose() {
@@ -48,11 +49,19 @@ class _ReceiveTabState extends State<ReceiveTab> {
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context).strings;
-    return ListenableBuilder(listenable: s, builder: (context, _) => _build(context));
+    final c = AppScope.of(context).controller;
+    return ListenableBuilder(listenable: Listenable.merge([s, c]), builder: (context, _) => _build(context));
   }
 
   Widget _build(BuildContext context) {
-    final s = AppScope.of(context).strings;
+    final app = AppScope.of(context);
+    final s = app.strings;
+    final invite = app.controller.consumeInviteCode();
+    if (invite != null) {
+      _code.text = invite;
+      _invalid = false;
+      _fromInvite = true;
+    }
     final theme = Theme.of(context);
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -80,10 +89,26 @@ class _ReceiveTabState extends State<ReceiveTab> {
             ),
           ),
           onChanged: (_) {
-            if (_invalid) setState(() => _invalid = false);
+            if (_invalid || _fromInvite) {
+              setState(() {
+                _invalid = false;
+                _fromInvite = false;
+              });
+            }
           },
           onSubmitted: (_) => _start(),
         ),
+        if (_fromInvite) ...[
+          const SizedBox(height: 8),
+          Row(
+            key: const Key('invite-hint'),
+            children: [
+              Icon(Icons.link, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(child: Text(s.t('m_invite_prefilled'), style: TextStyle(color: theme.colorScheme.primary))),
+            ],
+          ),
+        ],
         const SizedBox(height: 24),
         FilledButton.icon(
           key: const Key('receive'),

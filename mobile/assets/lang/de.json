@@ -11,7 +11,7 @@
   "m_copy": "Kopieren",
   "m_share": "Teilen",
   "m_copied": "Kopiert",
-  "m_share_code_text": "SecureShare-Code: {code}",
+  "m_share_code_text": "Ich sende dir eine Datei mit SecureShare. Öffne den Link: {link}\noder gib den Code in SecureShare am Computer ein: {code}",
   "m_paste": "Einfügen",
   "m_invalid_code": "Der Code sieht so aus: xxxx-xxxx (8 Buchstaben und Ziffern).",
   "m_save_to": "Dateien werden in „{folder}“ gespeichert.",
@@ -41,7 +41,7 @@
   "m_source_code": "Quellcode (GitHub)",
   "m_support": "Projekt unterstützen",
   "m_run_again": "Erneut prüfen",
-  "m_help_send_body": "1.  Im Tab „Senden“ auf „Datei auswählen“ tippen\n2.  „Senden“ tippen — ein Sitzungscode erscheint\n3.  Den Code dem Empfänger geben (mit „Teilen“)\n4.  Den Prüfcode vergleichen und „Codes stimmen überein“ tippen\n\nAuch aus einer anderen App: „Teilen“ → SecureShare.",
+  "m_help_send_body": "1.  Im Tab „Senden“ auf „Datei auswählen“ tippen\n2.  „Senden“ tippen — ein Sitzungscode erscheint\n3.  „Teilen“ tippen — der Empfänger erhält einen Link: Auf dem Telefon öffnet er SecureShare mit eingetragenem Code, am Computer zeigt er den Code\n4.  Den Prüfcode vergleichen und „Codes stimmen überein“ tippen\n\nAuch aus einer anderen App: „Teilen“ → SecureShare.",
   "m_help_recv_body": "1.  Im Tab „Empfangen“ den Code des Absenders eingeben\n2.  „Empfangen“ tippen\n3.  Den Prüfcode vergleichen und „Codes stimmen überein“ tippen\n\nDateien werden unter Download/SecureShare gespeichert. Eine vorhandene Datei wird nie überschrieben — die neue heißt dann „Name (1).ext“.",
   "m_help_background_title": "📱  Im Hintergrund",
   "m_help_background_body": "Die Übertragung läuft weiter, wenn der Bildschirm aus ist oder eine andere App geöffnet ist: Der Fortschritt steht in einer Benachrichtigung, dort lässt sie sich auch abbrechen.\n\nWenn das Telefon die Übertragung trotzdem stoppt (Energiesparmodus), starte sie mit einem neuen Code erneut — bereits Übertragenes wird nicht noch einmal gesendet.",
@@ -50,5 +50,8 @@
   "m_update_later": "Später",
   "m_update_download": "Herunterladen",
   "m_update_install_hint": "Öffne die heruntergeladene Datei und bestätige die Installation. Android fragt eventuell, ob Installationen aus dem Browser erlaubt sind — nur einmal. Daten und Einstellungen bleiben erhalten.",
-  "m_update_check": "Nach Updates suchen"
+  "m_update_check": "Nach Updates suchen",
+  "m_invite_prefilled": "Code aus der Einladung. Tippe auf „Empfangen“, sobald der Absender bereit ist.",
+  "m_invite_invalid": "Dieser Link ist keine SecureShare-Einladung.",
+  "m_invite_busy": "Beende zuerst die laufende Übertragung und öffne die Einladung dann erneut."
 }

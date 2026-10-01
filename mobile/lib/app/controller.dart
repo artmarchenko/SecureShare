@@ -16,6 +16,7 @@ import '../transfer/status.dart';
 import '../transfer/storage.dart';
 import 'device.dart';
 import 'i18n.dart';
+import 'invite.dart';
 
 // ── Engine seam (the real one is the relay engine; tests script their own) ──
 
@@ -105,6 +106,7 @@ class TransferController extends ChangeNotifier {
     this.verifyTimeout = const Duration(seconds: 120),
   }) : _newCode = newCode ?? newSessionCode {
     _subs.add(device.sharedFileArrived.listen((_) => takeSharedFile()));
+    _subs.add(device.linkOpened.listen((_) => takeOpenedLink()));
     _subs.add(device.cancelRequested.listen((_) => cancel()));
   }
 
@@ -120,6 +122,11 @@ class TransferController extends ChangeNotifier {
 
   /// Set when a file is shared from another app: the UI switches to Send.
   int sharedFileCount = 0;
+
+  /// A code from an invitation link, waiting for the Receive tab to pick it
+  /// up; [inviteCount] grows with each link so the UI switches to Receive.
+  String? inviteCode;
+  int inviteCount = 0;
 
   Phase phase = Phase.idle;
   bool sending = true;
@@ -170,6 +177,26 @@ class TransferController extends ChangeNotifier {
     } catch (e) {
       _setError(strings.t('relay_file_read_error', {'error': e}));
     }
+  }
+
+  /// The app was opened with an invitation link: prefill Receive. Nothing
+  /// starts by itself — the user still taps Receive.
+  Future<void> takeOpenedLink() async {
+    final link = await device.takeOpenedLink();
+    if (link == null) return;
+    final code = codeFromInvite(link);
+    if (code == null) return _setError(strings.t('m_invite_invalid'));
+    if (busy) return _setError(strings.t('m_invite_busy'));
+    inviteCode = code;
+    inviteCount++;
+    notifyListeners();
+  }
+
+  /// The invitation code, once.
+  String? consumeInviteCode() {
+    final c = inviteCode;
+    inviteCode = null;
+    return c;
   }
 
   void _select(PickedFile f) {

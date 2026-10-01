@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.artmarchenko.secureshare",
+      "sha256_cert_fingerprints": [
+        "64:33:7E:8C:F0:78:98:45:A3:F4:93:C9:57:E3:0E:D6:22:72:D9:C0:E3:4D:AD:70:36:00:4B:DA:2F:85:71:EC"
+      ]
+    }
+  }
+]

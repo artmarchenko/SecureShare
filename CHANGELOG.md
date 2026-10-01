@@ -7,6 +7,7 @@ First version of SecureShare for Android. Works with SecureShare 4.x on Windows 
 ### New
 - Send and receive files up to 5 GB, end-to-end encrypted; the same session code and verification code as on the computer.
 - Send from any app: **Share → SecureShare**.
+- **Invitation links:** Share on the session code sends `https://secureshare-relay.duckdns.org/r#<code>` — on a phone with SecureShare it opens the app with the code filled in, elsewhere it shows the code and where to get the app. The code is after `#`, so it never reaches the server.
 - Transfers continue with the screen off or the app in the background; progress and **Cancel** in the notification.
 - Automatic reconnect and resume after a dropped connection; after an interrupted transfer, sending the same file again continues where it stopped.
 - Received files go to **Download/SecureShare**; existing files are never overwritten.

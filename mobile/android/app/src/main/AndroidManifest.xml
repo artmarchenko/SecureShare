@@ -32,6 +32,16 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- links are handled by NativeBridge, not as Flutter routes -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
+            <!-- Invitation links https://secureshare-relay.duckdns.org/r#<code>; verified
+                 through /.well-known/assetlinks.json, so they open the app directly -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="secureshare-relay.duckdns.org" android:path="/r"/>
+            </intent-filter>
             <!-- "Share → SecureShare" from other apps -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND"/>

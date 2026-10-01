@@ -46,6 +46,7 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
     private var pendingPermission: MethodChannel.Result? = null
     private var sharedFile: Map<String, Any?>? = null
     private var selfTestRequested = false
+    private var openedLink: String? = null
     private class OpenFile(val pfd: ParcelFileDescriptor, val channel: FileChannel, val cacheCopy: File?)
     private val openFiles = mutableMapOf<Int, OpenFile>()
     private var nextHandle = 1
@@ -69,6 +70,14 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
             intent.removeExtra("selftest")
             selfTestRequested = true
             channel.invokeMethod("selfTest", null)
+        }
+        // an invitation link (https://…/r#code); Dart checks it
+        if (intent?.action == Intent.ACTION_VIEW && intent.data != null) {
+            openedLink = intent.dataString
+            intent.action = null // handled; not again after a configuration change
+            intent.data = null
+            channel.invokeMethod("openedLink", null)
+            return
         }
         if (intent?.action != Intent.ACTION_SEND) return
         @Suppress("DEPRECATION")
@@ -94,6 +103,10 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                 )
             }
             "pickFile" -> pickFile(result)
+            "takeOpenedLink" -> {
+                result.success(openedLink)
+                openedLink = null
+            }
             "takeSelfTest" -> {
                 result.success(selfTestRequested)
                 selfTestRequested = false

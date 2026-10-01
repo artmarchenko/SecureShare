@@ -42,5 +42,6 @@ Future<void> main() async {
     if (await device.takeSelfTest()) unawaited(reportSelfTest(device, services.strings));
   }
   unawaited(services.updates.check()); // newer android-v* release on GitHub?
+  await services.controller.takeOpenedLink(); // opened via an invitation link
   await services.controller.takeSharedFile(); // opened via "Share → SecureShare"
 }
