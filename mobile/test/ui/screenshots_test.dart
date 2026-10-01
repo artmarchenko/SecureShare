@@ -31,7 +31,13 @@ Future<void> _loadFont(String family, List<String> paths) async {
 }
 
 void main() {
-  final fonts = p.join(Platform.environment['FLUTTER_ROOT'] ?? '', 'bin', 'cache', 'artifacts', 'material_fonts');
+  // <flutter>/bin/cache/artifacts/material_fonts, found from the test runner
+  // (…/bin/cache/artifacts/engine/<platform>/flutter_tester) or FLUTTER_ROOT
+  final fonts = [
+    p.join(p.dirname(p.dirname(p.dirname(Platform.resolvedExecutable))), 'material_fonts'),
+    p.join(Platform.environment['FLUTTER_ROOT'] ?? '', 'bin', 'cache', 'artifacts', 'material_fonts'),
+  ].firstWhere((d) => File(p.join(d, 'roboto-regular.ttf')).existsSync(),
+      orElse: () => throw StateError('Flutter material fonts not found near ${Platform.resolvedExecutable}'));
   setUpAll(() async {
     await _loadFont('Roboto', [
       for (final w in ['regular', 'medium', 'bold']) p.join(fonts, 'roboto-$w.ttf'),
