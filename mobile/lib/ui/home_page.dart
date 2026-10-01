@@ -11,6 +11,7 @@ import 'receive_tab.dart';
 import 'send_tab.dart';
 import 'settings_page.dart';
 import 'transfer_view.dart';
+import 'update_ui.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -64,7 +65,12 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           body: SafeArea(
-            child: idle ? (_tab == 0 ? const SendTab() : const ReceiveTab()) : const TransferView(),
+            child: idle
+                ? Column(children: [
+                    const UpdateBanner(),
+                    Expanded(child: _tab == 0 ? const SendTab() : const ReceiveTab()),
+                  ])
+                : const TransferView(),
           ),
           bottomNavigationBar: idle
               ? NavigationBar(

@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app/controller.dart';
 import 'app/device.dart';
 import 'app/i18n.dart';
+import 'app/selftest.dart';
 import 'app/settings.dart';
+import 'app/updates.dart';
 import 'transfer/peer.dart';
 import 'ui/app.dart';
 
@@ -24,12 +28,19 @@ Future<AppServices> createServices({Device? device, TransferEngine? engine, Stri
     engine: engine ?? const RelayEngine(TransferOptions(relayUrl: relayUrl)),
     newCode: newCode,
   );
-  return AppServices(device: d, strings: strings, settings: settings, controller: controller, relayUrl: relayUrl);
+  return AppServices(
+      device: d, strings: strings, settings: settings, controller: controller, updates: Updates(), relayUrl: relayUrl);
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final services = await createServices();
   runApp(SecureShareApp(services: services));
+  final device = services.device;
+  if (device is NativeDevice) {
+    device.selfTestRequested.listen((_) => reportSelfTest(device, services.strings));
+    if (await device.takeSelfTest()) unawaited(reportSelfTest(device, services.strings));
+  }
+  unawaited(services.updates.check()); // newer android-v* release on GitHub?
   await services.controller.takeSharedFile(); // opened via "Share → SecureShare"
 }

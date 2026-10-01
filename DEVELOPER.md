@@ -593,6 +593,32 @@ pytest on `ubuntu-latest` (xvfb) and `windows-latest` with coverage `fail_under=
 `screenshots` job that uploads UI screenshots (3 languages × 5 screens) as artifacts.
 Also called by `release.yml` as a gate before building.
 
+### 8.1c. Workflow: `release-android.yml` (on `android-v*` tag)
+
+Android has its own version line (`android-vX.Y.Z`, see `MOBILE_PLAN.md`);
+compatibility with the desktop is defined by the protocol (v2), not by the
+version numbers. The two release pipelines never trigger each other.
+
+```
+Push tag android-vX.Y.Z
+  ├─ tests.yml (desktop + Android, incl. emulators API 34 and 29)
+  ├─ build: tag = mobile/pubspec.yaml = "## Android X.Y.Z" in CHANGELOG.md;
+  │         signed APKs (SecureShare.apk = arm64, + universal / armeabi-v7a / x86_64),
+  │         signer must match mobile/android/release-cert.sha256, versionCode = X*10000+Y*100+Z
+  ├─ smoke: signed universal APK on an emulator, `--ez selftest true`
+  │         (scripts/android_selftest.py → "SECURESHARE_SELFTEST OK X.Y.Z")
+  ├─ release: GitHub Release, make_latest=false (the desktop updater reads
+  │           releases/latest); SHA256SUMS.txt + .sig (same Ed25519 key)
+  └─ upload-apk: VPS downloads/SecureShare.apk → https://…/download/SecureShare.apk
+                 (Caddy serves the file; no relay restart); verified by checksum
+```
+
+Release steps: bump `version:` in `mobile/pubspec.yaml` (`X.Y.Z+<X*10000+Y*100+Z>`)
+and `appVersion` in `mobile/lib/transfer/handshake.dart` (a test keeps them
+equal), add `## Android X.Y.Z` to `CHANGELOG.md`, merge, then
+`git tag android-vX.Y.Z && git push origin android-vX.Y.Z`. The app finds the
+release itself (Settings → Check for updates / banner on start).
+
 ### 8.2. Workflow: `release.yml` (on `v*` tag)
 
 ```
@@ -948,7 +974,10 @@ Secrets configured in repository settings:
 | `VPS_HOST` | all deploy workflows | VPS IP address for deployment |
 | `VPS_USER` | all deploy workflows | SSH username on VPS |
 | `VPS_SSH_KEY` | all deploy workflows | Full SSH private key for VPS access |
-| `RELEASE_SIGNING_KEY` | `release.yml` | Ed25519 key that signs `SHA256SUMS.txt` (see 12.3) |
+| `RELEASE_SIGNING_KEY` | `release.yml`, `release-android.yml` | Ed25519 key that signs `SHA256SUMS.txt` (see 12.3) |
+| `ANDROID_KEYSTORE_B64` | `release-android.yml` | APK signing keystore (PKCS12, base64), see 12.3b |
+| `ANDROID_KEYSTORE_PASSWORD` | `release-android.yml` | its password (store = key password) |
+| `ANDROID_KEY_ALIAS` | `release-android.yml` | key alias (`secureshare`) |
 | `CERT_THUMBPRINT` | *(future)* | Code signing certificate |
 | `DUCKDNS_TOKEN` | *(future)* | DuckDNS API token for IP updates |
 | `GITHUB_TOKEN` | `release.yml` | Auto-provided for GitHub Release creation |
@@ -974,6 +1003,27 @@ A compromised GitHub account or CDN therefore cannot push an update.
   primary in `TRUSTED_RELEASE_KEYS` with the new public key (keep the
   backup's), release. Installed clients accept that release via the backup
   key; later releases can go back to being signed with the new primary.
+
+### 12.3b. APK Signing Key
+
+Android installs an update only if it is signed with the **same key** as the
+installed app. Losing the key means users must uninstall and reinstall (data
+lost) — there is no rotation for sideloaded APKs. Google Play (M5) can later
+take over with Play App Signing.
+
+| Copy | Where |
+|------|-------|
+| primary | GitHub secrets `ANDROID_KEYSTORE_B64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` |
+| backup | offline with the maintainer (keystore file + password), never in the repo |
+
+- Certificate SHA-256 (public, also on the landing page and in release notes):
+  `64:33:7E:8C:F0:78:98:45:A3:F4:93:C9:57:E3:0E:D6:22:72:D9:C0:E3:4D:AD:70:36:00:4B:DA:2F:85:71:EC`,
+  pinned in `mobile/android/release-cert.sha256`; the release fails if an APK is signed otherwise.
+- Check an APK: `apksigner verify --print-certs SecureShare.apk`.
+- Local signed build: put `storeFile` / `storePassword` / `keyAlias` / `keyPassword`
+  into the untracked `mobile/android/key.properties` (or the `ANDROID_KEYSTORE_*`
+  env vars); without them a release build is signed with the debug key and
+  cannot update a published install.
 
 ### 12.4. Rules
 

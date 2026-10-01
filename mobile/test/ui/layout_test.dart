@@ -23,7 +23,7 @@ void main() {
           seen.add(screen);
           expect(tester.takeException(), isNull, reason: '$screen ($lang, $name)');
         });
-        expect(seen, hasLength(13));
+        expect(seen, hasLength(15));
       });
     }
   }

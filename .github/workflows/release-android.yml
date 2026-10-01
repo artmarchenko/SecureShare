@@ -1,0 +1,284 @@
+# ──────────────────────────────────────────────────────────────
+#  SecureShare for Android — release pipeline
+#
+#  Triggered by a tag android-vX.Y.Z (desktop releases use v*; the two
+#  never trigger each other's pipeline).
+#
+#  1. Full test suite (tests.yml: desktop + Android incl. the emulator run)
+#  2. Build: version checks, signed APKs (arm64 = SecureShare.apk, plus
+#     universal / armeabi-v7a / x86_64), signer pinned to
+#     mobile/android/release-cert.sha256
+#  3. Smoke test: the signed universal APK on an emulator (--ez selftest)
+#  4. GitHub Release "SecureShare for Android X.Y.Z" — NOT marked latest,
+#     so the desktop auto-updater (releases/latest) never sees it;
+#     SHA256SUMS.txt signed with the release Ed25519 key
+#  5. Upload SecureShare.apk to the VPS → /download/SecureShare.apk
+#     (static file; no relay restart)
+# ──────────────────────────────────────────────────────────────
+
+name: Release Android
+
+on:
+  push:
+    tags:
+      - "android-v*"
+  # dry run when the pipeline itself changes: build, sign, smoke — no release, no upload
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-android.yml"
+      - "scripts/android_selftest.py"
+      - "mobile/android/**"
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    name: Test suite
+    uses: ./.github/workflows/tests.yml
+
+  build:
+    name: Build signed APKs
+    runs-on: ubuntu-latest
+    needs: [tests]
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version checks (tag = pubspec = CHANGELOG)
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else  # dry run: the version the next release would have
+            TAG="android-v$(grep -oP '^version: *\K[0-9.]+' mobile/pubspec.yaml)"
+          fi
+          VER="${TAG#android-v}"
+          echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::bad tag $TAG"; exit 1; }
+          PUB=$(sed -n 's/^version: *\([0-9.]*\)+.*/\1/p' mobile/pubspec.yaml)
+          [ "$PUB" = "$VER" ] || { echo "::error::mobile/pubspec.yaml has $PUB, tag says $VER"; exit 1; }
+          grep -q "^## Android $VER\b" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## Android $VER' section"; exit 1; }
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.5"
+          channel: stable
+          cache: true
+
+      - name: Build (release key from secrets)
+        working-directory: mobile
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          [ -n "$ANDROID_KEYSTORE_B64" ] || { echo "::error::ANDROID_KEYSTORE_B64 secret is missing"; exit 1; }
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          flutter pub get
+          # one versionCode for all variants, so any of them can update any other
+          flutter build apk --release -P force-version-code-ignoring-abi=true
+          flutter build apk --release --split-per-abi -P force-version-code-ignoring-abi=true
+          rm -f "$ANDROID_KEYSTORE_PATH"
+
+      - name: Collect and verify (signer, version)
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          OUT=mobile/build/app/outputs/flutter-apk
+          mkdir -p dist
+          cp $OUT/app-arm64-v8a-release.apk   dist/SecureShare.apk
+          cp $OUT/app-release.apk             dist/SecureShare-universal.apk
+          cp $OUT/app-armeabi-v7a-release.apk dist/SecureShare-armeabi-v7a.apk
+          cp $OUT/app-x86_64-release.apk      dist/SecureShare-x86_64.apk
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | grep -E '^[0-9.]+$' | sort -V | tail -1)"
+          echo "build-tools: $BT"
+          PINNED=$(tr -d ' \n' < mobile/android/release-cert.sha256)
+          CODE=$(echo "$VER" | awk -F. '{print $1*10000 + $2*100 + $3}')
+          for apk in dist/*.apk; do
+            CERTS=$("$BT/apksigner" verify --print-certs "$apk" 2>&1) || { echo "$CERTS"; echo "::error::$apk: signature invalid"; exit 1; }
+            DIGEST=$(echo "$CERTS" | grep -m1 -oE 'certificate SHA-256 digest: [0-9a-f]{64}' | grep -oE '[0-9a-f]{64}' || true)
+            [ "$DIGEST" = "$PINNED" ] || { echo "$CERTS"; echo "::error::$apk is signed by '$DIGEST', expected $PINNED"; exit 1; }
+            BADGE=$("$BT/aapt2" dump badging "$apk" | head -1)
+            echo "$BADGE" | grep -q "versionCode='$CODE' versionName='$VER'" \
+              || { echo "::error::$apk: $BADGE"; exit 1; }
+            echo "✓ $apk  $(du -h "$apk" | cut -f1)  signer ok, $VER ($CODE)"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: dist/
+
+  smoke:
+    name: Signed APK on an emulator (self-test)
+    runs-on: ubuntu-latest
+    needs: [build]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apks
+          path: dist/
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Self-test on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: python3 scripts/android_selftest.py dist/SecureShare-universal.apk --version ${{ needs.build.outputs.version }}
+
+  release:
+    name: GitHub Release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    needs: [build, smoke]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apks
+          path: dist/
+
+      - name: SHA-256 checksums
+        run: |
+          cd dist
+          {
+            echo "# SecureShare for Android ${{ needs.build.outputs.version }} — SHA-256 Checksums"
+            echo "# APK signing certificate SHA-256: $(tr -d ' \n' < ../mobile/android/release-cert.sha256)"
+            sha256sum SecureShare.apk SecureShare-universal.apk SecureShare-armeabi-v7a.apk SecureShare-x86_64.apk
+          } > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sign SHA256SUMS.txt (Ed25519, same key as desktop releases)
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          pip install "cryptography>=46.0.5"
+          python scripts/release_signing.py sign dist/SHA256SUMS.txt
+
+      - name: Release notes
+        id: notes
+        run: |
+          VER="${{ needs.build.outputs.version }}"
+          # The in-app update dialog shows the "### Changes" section.
+          CHANGES=$(awk -v ver="$VER" '$0 ~ "^## Android "ver"( |$)" {f=1; next} /^## / {f=0} f' CHANGELOG.md \
+                    | sed -e 's/^### \(.*\)/**\1**/' -e '/^$/d')
+          CERT=$(tr -d ' \n' < mobile/android/release-cert.sha256)
+          {
+            echo "notes<<EOF"
+            echo "## SecureShare for Android $VER"
+            echo ""
+            echo "### Changes"
+            echo "$CHANGES"
+            echo ""
+            echo "### Download"
+            echo "| File | For |"
+            echo "|---|---|"
+            echo "| \`SecureShare.apk\` | almost all phones (64-bit ARM) — **use this one** |"
+            echo "| \`SecureShare-universal.apk\` | any device, if the one above does not install |"
+            echo "| \`SecureShare-armeabi-v7a.apk\` / \`SecureShare-x86_64.apk\` | older 32-bit phones / Chromebooks and emulators |"
+            echo ""
+            echo "Open the APK on the phone and allow installing from that source when Android asks. Updates install over the old version; data and settings are kept."
+            echo ""
+            echo "### Verify"
+            echo "APK signing certificate SHA-256: \`$CERT\`"
+            echo "(\`apksigner verify --print-certs SecureShare.apk\`). Checksums: \`SHA256SUMS.txt\`, signed: \`SHA256SUMS.txt.sig\`."
+            echo ""
+            echo "### Requirements"
+            echo "- Android 7.0 or newer"
+            echo "- Works with SecureShare 4.x on Windows / Linux"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release (not "latest")
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SecureShare for Android ${{ needs.build.outputs.version }}
+          body: ${{ steps.notes.outputs.notes }}
+          make_latest: "false"
+          files: |
+            dist/SecureShare.apk
+            dist/SecureShare-universal.apk
+            dist/SecureShare-armeabi-v7a.apk
+            dist/SecureShare-x86_64.apk
+            dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt.sig
+
+      - name: Desktop auto-update still sees a desktop release as latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST=$(gh api repos/${{ github.repository }}/releases/latest -q .tag_name)
+          echo "latest = $LATEST"
+          case "$LATEST" in android-*) echo "::error::an Android release became 'latest'"; exit 1;; esac
+
+  upload-apk:
+    name: Upload APK to the VPS
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    needs: [build, release]
+    timeout-minutes: 10
+    concurrency:
+      group: vps-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apks
+          path: dist/
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload (versioned + SecureShare.apk), atomically
+        run: |
+          VER="${{ needs.build.outputs.version }}"
+          VPS="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          DEST="/home/${{ secrets.VPS_USER }}/secureshare-relay/downloads"
+          SSH="ssh -i $HOME/.ssh/vps_key"
+          $SSH "$VPS" "mkdir -p $DEST"
+          scp -i ~/.ssh/vps_key dist/SecureShare.apk "$VPS:$DEST/SecureShare-android-$VER.apk"
+          $SSH "$VPS" "cp $DEST/SecureShare-android-$VER.apk $DEST/.SecureShare.apk.tmp && mv $DEST/.SecureShare.apk.tmp $DEST/SecureShare.apk"
+
+      - name: Verify the public download
+        run: |
+          sleep 3
+          curl -sfL --max-time 60 -o downloaded.apk https://secureshare-relay.duckdns.org/download/SecureShare.apk
+          [ "$(sha256sum < downloaded.apk)" = "$(sha256sum < dist/SecureShare.apk)" ] \
+            || { echo "::error::/download/SecureShare.apk differs from the release"; exit 1; }
+          echo "✓ https://secureshare-relay.duckdns.org/download/SecureShare.apk = release APK"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/vps_key

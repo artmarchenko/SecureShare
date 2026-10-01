@@ -75,6 +75,8 @@ void main() {
   });
 
   testWidgets('receive from the PC, app in the background mid-transfer', (tester) async {
+    // ignore: avoid_print
+    print('E2E:RECEIVE_START'); // the runner starts the PC sender now
     await tester.pumpWidget(SecureShareApp(services: app));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('tab-receive')));

@@ -1,5 +1,18 @@
 # Changelog
 
+## Android 1.0.0 — 2026-10
+
+First version of SecureShare for Android. Works with SecureShare 4.x on Windows and Linux (protocol v2) and with other phones.
+
+### New
+- Send and receive files up to 5 GB, end-to-end encrypted; the same session code and verification code as on the computer.
+- Send from any app: **Share → SecureShare**.
+- Transfers continue with the screen off or the app in the background; progress and **Cancel** in the notification.
+- Automatic reconnect and resume after a dropped connection; after an interrupted transfer, sending the same file again continues where it stopped.
+- Received files go to **Download/SecureShare**; existing files are never overwritten.
+- Ukrainian, English and German; light and dark theme; network diagnostics.
+- Checks for new Android versions on GitHub.
+
 ## 4.0.0 — 2026-10
 
 **Breaking:** 4.x clients cannot connect to 3.x clients. Both sides need 4.0 or newer.

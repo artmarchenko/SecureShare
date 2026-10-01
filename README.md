@@ -1,6 +1,6 @@
 # SecureShare
 
-**End-to-end encrypted file transfer between two computers** — a standalone app for Windows and Linux. No registration, no cloud storage, no network configuration.
+**End-to-end encrypted file transfer between devices** — a standalone app for Windows, Linux and Android. No registration, no cloud storage, no network configuration.
 
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -35,6 +35,17 @@ SecureShare sends one file from one person to another over the internet. Both si
 2. Compare the verification code and confirm; the file is saved when the transfer completes
 
 > Both sides need SecureShare **4.0 or newer** — 4.x cannot connect to 3.x.
+
+### Android
+
+[Download SecureShare.apk](https://secureshare-relay.duckdns.org/download/SecureShare.apk) (Android 7.0+), open it on the phone and allow the installation when asked. Other builds (universal, 32-bit, x86_64) are on the [releases page](https://github.com/artmarchenko/SecureShare/releases) under `android-v*`.
+
+- Works with SecureShare 4.x on the computer in both directions, and phone to phone.
+- Send from any app via **Share → SecureShare**; received files go to **Download/SecureShare**.
+- Transfers keep running with the screen off; progress and Cancel in the notification.
+- APK signing certificate SHA-256: `64:33:7E:8C:F0:78:98:45:A3:F4:93:C9:57:E3:0E:D6:22:72:D9:C0:E3:4D:AD:70:36:00:4B:DA:2F:85:71:EC` — check with `apksigner verify --print-certs SecureShare.apk`.
+
+Source: [`mobile/`](mobile/) (Flutter).
 
 ## How It Works
 

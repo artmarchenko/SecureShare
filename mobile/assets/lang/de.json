@@ -44,5 +44,11 @@
   "m_help_send_body": "1.  Im Tab „Senden“ auf „Datei auswählen“ tippen\n2.  „Senden“ tippen — ein Sitzungscode erscheint\n3.  Den Code dem Empfänger geben (mit „Teilen“)\n4.  Den Prüfcode vergleichen und „Codes stimmen überein“ tippen\n\nAuch aus einer anderen App: „Teilen“ → SecureShare.",
   "m_help_recv_body": "1.  Im Tab „Empfangen“ den Code des Absenders eingeben\n2.  „Empfangen“ tippen\n3.  Den Prüfcode vergleichen und „Codes stimmen überein“ tippen\n\nDateien werden unter Download/SecureShare gespeichert. Eine vorhandene Datei wird nie überschrieben — die neue heißt dann „Name (1).ext“.",
   "m_help_background_title": "📱  Im Hintergrund",
-  "m_help_background_body": "Die Übertragung läuft weiter, wenn der Bildschirm aus ist oder eine andere App geöffnet ist: Der Fortschritt steht in einer Benachrichtigung, dort lässt sie sich auch abbrechen.\n\nWenn das Telefon die Übertragung trotzdem stoppt (Energiesparmodus), starte sie mit einem neuen Code erneut — bereits Übertragenes wird nicht noch einmal gesendet."
+  "m_help_background_body": "Die Übertragung läuft weiter, wenn der Bildschirm aus ist oder eine andere App geöffnet ist: Der Fortschritt steht in einer Benachrichtigung, dort lässt sie sich auch abbrechen.\n\nWenn das Telefon die Übertragung trotzdem stoppt (Energiesparmodus), starte sie mit einem neuen Code erneut — bereits Übertragenes wird nicht noch einmal gesendet.",
+  "m_update_available": "Neue Version {version} verfügbar",
+  "m_update_details": "Details",
+  "m_update_later": "Später",
+  "m_update_download": "Herunterladen",
+  "m_update_install_hint": "Öffne die heruntergeladene Datei und bestätige die Installation. Android fragt eventuell, ob Installationen aus dem Browser erlaubt sind — nur einmal. Daten und Einstellungen bleiben erhalten.",
+  "m_update_check": "Nach Updates suchen"
 }
