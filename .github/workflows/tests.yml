@@ -164,7 +164,7 @@ jobs:
       - name: Fonts
         working-directory: .
         run: |
-          flutter precache --universal
+          flutter precache --universal --force   # the cached SDK may have the stamp without the files
           sudo apt-get install -y --no-install-recommends fonts-noto-color-emoji fonts-dejavu-core
 
       - name: Protocol vectors, screens, translations, interop with the Python client, memory
