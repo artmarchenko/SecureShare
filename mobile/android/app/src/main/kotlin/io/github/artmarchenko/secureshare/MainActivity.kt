@@ -1,37 +1,43 @@
 package io.github.artmarchenko.secureshare
 
+import android.content.Intent
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
-import org.bouncycastle.crypto.generators.SCrypt
-import java.util.concurrent.Executors
 
+/** Attaches to the process-wide engine (see SecureShareApp) instead of owning one. */
 class MainActivity : FlutterActivity() {
-    private val worker = Executors.newSingleThreadExecutor()
+    private val bridge get() = (application as SecureShareApp).bridge
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "secureshare/native")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    // scrypt(password, salt, N, r, p, length) on a background thread
-                    "scrypt" -> worker.execute {
-                        try {
-                            val key = SCrypt.generate(
-                                call.argument<ByteArray>("password")!!,
-                                call.argument<ByteArray>("salt")!!,
-                                call.argument<Int>("n")!!,
-                                call.argument<Int>("r")!!,
-                                call.argument<Int>("p")!!,
-                                call.argument<Int>("length")!!,
-                            )
-                            runOnUiThread { result.success(key) }
-                        } catch (e: Exception) {
-                            runOnUiThread { result.error("scrypt", e.message, null) }
-                        }
-                    }
-                    else -> result.notImplemented()
-                }
-            }
+    override fun getCachedEngineId() = SecureShareApp.ENGINE_ID
+
+    override fun shouldDestroyEngineWithHost() = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        bridge.attach(this)
+        // a share from another app; ignore it when the activity is restored from history
+        if (savedInstanceState == null) bridge.onIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        bridge.onIntent(intent)
+    }
+
+    override fun onDestroy() {
+        bridge.detach(this)
+        super.onDestroy()
+    }
+
+    @Deprecated("Activity result API is not available to FlutterActivity")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        bridge.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        bridge.onPermissionResult(requestCode, grantResults)
     }
 }

@@ -20,6 +20,8 @@ on:
       - "pytest.ini"
       - ".coveragerc"
       - "scripts/ui_screenshots.py"
+      - "scripts/local_relay.py"
+      - "scripts/android_e2e.py"
       - "mobile/**"
       - ".github/workflows/tests.yml"
   pull_request:
@@ -33,6 +35,8 @@ on:
       - "pytest.ini"
       - ".coveragerc"
       - "scripts/ui_screenshots.py"
+      - "scripts/local_relay.py"
+      - "scripts/android_e2e.py"
       - "mobile/**"
       - ".github/workflows/tests.yml"
   workflow_call:
@@ -122,7 +126,7 @@ jobs:
           retention-days: 14
 
   android-core:
-    name: Android core (Dart) + interop with Python
+    name: Android (Dart, UI, interop with Python)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
@@ -156,7 +160,69 @@ jobs:
       - name: Static analysis
         run: flutter analyze
 
-      - name: Protocol vectors + interop with the Python client + memory
+      # real fonts for the screenshots (emoji in status texts)
+      - name: Fonts
+        working-directory: .
+        run: sudo apt-get install -y --no-install-recommends fonts-noto-color-emoji fonts-dejavu-core
+
+      - name: Protocol vectors, screens, translations, interop with the Python client, memory
         env:
           PYTHON: python
         run: flutter test
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-screenshots
+          path: mobile/build/screenshots/
+          if-no-files-found: ignore
+
+  android-e2e:
+    name: Android app on an emulator (end-to-end with the PC client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.5"
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            server/requirements.txt
+
+      - name: Python dependencies (relay + CLI peer)
+        run: pip install "cryptography>=46.0.5" "websocket-client>=1.7.0" certifi -r server/requirements.txt
+
+      - name: Flutter dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Run on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: python scripts/android_e2e.py --mb 32

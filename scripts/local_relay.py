@@ -27,10 +27,11 @@ from tests.helpers.local_relay import LocalRelay  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("--host", default="127.0.0.1", help="listen address (0.0.0.0 to reach it from other devices)")
+    parser.add_argument("--port", type=int, default=0, help="WebSocket port (default: a free one)")
     args = parser.parse_args()
     # the readiness probe opens a bare TCP connection; don't log it as an error
     logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
-    relay = LocalRelay(Path(tempfile.mkdtemp(prefix="secureshare-local-relay-")), host=args.host)
+    relay = LocalRelay(Path(tempfile.mkdtemp(prefix="secureshare-local-relay-")), host=args.host, port=args.port)
     print(f"READY {relay.url}", flush=True)
     try:
         sys.stdin.read()          # returns when the parent closes stdin

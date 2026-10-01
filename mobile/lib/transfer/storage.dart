@@ -22,12 +22,14 @@ abstract class FileSource {
 }
 
 class LocalFileSource implements FileSource {
-  LocalFileSource(this.file);
+  /// [name] overrides the file's own name (e.g. a /proc/self/fd/N path on Android).
+  LocalFileSource(this.file, {String? name}) : _name = name; // ignore: prefer_initializing_formals
   final File file;
+  final String? _name;
   RandomAccessFile? _raf;
 
   @override
-  String get name => p.basename(file.path);
+  String get name => _name ?? p.basename(file.path);
 
   @override
   Future<int> length() => file.length();
