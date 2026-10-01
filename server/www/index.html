@@ -749,7 +749,26 @@
       <p class="section-sub" data-i18n="changelog_sub">Проєкт активно розвивається — кожна версія робить передачу файлів безпечнішою та зручнішою</p>
       <div class="timeline">
 
-        <div class="tl-item latest">
+        <div class="tl-item latest major">
+          <div class="tl-dot"></div>
+          <div class="tl-header">
+            <span class="tl-version">v4.0.0</span>
+            <span class="tl-date" data-i18n="date_oct_2026">Жовтень 2026</span>
+            <span class="tl-tag security" data-i18n="tag_security">Безпека</span>
+          </div>
+          <ul class="tl-changes">
+            <li class="sec" data-i18n="cl_400_1">Несумісна з 3.x — для передачі обидві сторони мають оновитися до 4.0</li>
+            <li class="sec" data-i18n="cl_400_2">Протокол v2: навіть зламаний сервер не може непомітно перехопити передачу (commit-then-reveal, 40-бітний код верифікації)</li>
+            <li class="sec" data-i18n="cl_400_3">Сервер більше не отримує код сесії — лише ідентифікатор кімнати, з якого код не відновити</li>
+            <li class="sec" data-i18n="cl_400_4">Оновлення з цифровим підписом автора (Ed25519): встановлюються лише підписані версії</li>
+            <li class="feat" data-i18n="cl_400_5">Німецька мова інтерфейсу, перемикання мови без перезапуску</li>
+            <li class="feat" data-i18n="cl_400_6">Файли з однаковою назвою більше не перезаписуються — новий зберігається як «назва (1)»</li>
+            <li class="feat" data-i18n="cl_400_7">Перемикачі приватності в «Діагностиці»: звіти про збої та статистика</li>
+            <li class="fix" data-i18n="cl_400_8">≈300 автотестів на Windows і Linux, включно з інтерфейсом; реліз збирається лише з зелених тестів</li>
+          </ul>
+        </div>
+
+        <div class="tl-item">
           <div class="tl-dot"></div>
           <div class="tl-header">
             <span class="tl-version">v3.3.1</span>
@@ -879,7 +898,7 @@
         <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener" data-i18n="footer_bug">Повідомити про баг</a>
         <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener" data-i18n="footer_support">☕ Підтримати</a>
       </div>
-      <p>SecureShare v3.3.1 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
+      <p>SecureShare v4.0.0 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
     </div>
   </footer>
 
