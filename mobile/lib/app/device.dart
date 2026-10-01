@@ -36,6 +36,9 @@ abstract class Device {
   Future<PickedFile?> takeSharedFile();
   Future<void> releaseFile(int handle);
 
+  /// The link the app was opened with (invitation), at most once.
+  Future<String?> takeOpenedLink();
+
   /// Random-access reading of a picked file, for the sender.
   FileSource fileSource(PickedFile file);
 
@@ -57,6 +60,9 @@ abstract class Device {
   /// Fires when a file was shared to the running app.
   Stream<void> get sharedFileArrived;
 
+  /// Fires when the app is opened with a link while running.
+  Stream<void> get linkOpened;
+
   /// Fires when the user taps Cancel in the transfer notification.
   Stream<void> get cancelRequested;
 }
@@ -67,6 +73,8 @@ class NativeDevice implements Device {
       switch (call.method) {
         case 'sharedFile':
           _shared.add(null);
+        case 'openedLink':
+          _link.add(null);
         case 'cancelRequested':
           _cancel.add(null);
         case 'selfTest':
@@ -77,6 +85,7 @@ class NativeDevice implements Device {
 
   static const _channel = MethodChannel('secureshare/native');
   final _shared = StreamController<void>.broadcast();
+  final _link = StreamController<void>.broadcast();
   final _cancel = StreamController<void>.broadcast();
   final _selfTest = StreamController<void>.broadcast();
 
@@ -101,6 +110,10 @@ class NativeDevice implements Device {
   Future<PickedFile?> pickFile() async => _picked(await _channel.invokeMethod('pickFile'));
   @override
   Future<PickedFile?> takeSharedFile() async => _picked(await _channel.invokeMethod('takeSharedFile'));
+  @override
+  Future<String?> takeOpenedLink() => _channel.invokeMethod<String>('takeOpenedLink');
+  @override
+  Stream<void> get linkOpened => _link.stream;
   @override
   Future<void> releaseFile(int handle) => _channel.invokeMethod('releaseFile', {'handle': handle});
   @override

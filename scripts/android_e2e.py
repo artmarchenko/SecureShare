@@ -129,6 +129,10 @@ def main() -> int:
             if "E2E:RECEIVE_START" in line:
                 pc_sender = spawn([py, "-m", "app.cli", "--relay", relay_url, "--yes", "send", str(to_phone),
                                    "--code", recv_code], work / "pc_sender.log")
+                # the receiver gets its code the way a user does: by opening the invitation link
+                print(">>> opening the invitation link", flush=True)
+                later(1, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d",
+                      f"'https://secureshare-relay.duckdns.org/r#{recv_code.upper()}'", APP_ID)
             elif "E2E:TRANSFERRING" in line:
                 transferring += 1
                 if transferring == 1:   # receiving: leave the app, come back later

@@ -42,6 +42,7 @@ SecureShare sends one file from one person to another over the internet. Both si
 
 - Works with SecureShare 4.x on the computer in both directions, and phone to phone.
 - Send from any app via **Share → SecureShare**; received files go to **Download/SecureShare**.
+- **Invitation links** — sharing the session code sends `https://secureshare-relay.duckdns.org/r#<code>`: it opens the app with the code filled in, or shows the code in a browser. The code is in the `#` part, which browsers never send to the server.
 - Transfers keep running with the screen off; progress and Cancel in the notification.
 - APK signing certificate SHA-256: `64:33:7E:8C:F0:78:98:45:A3:F4:93:C9:57:E3:0E:D6:22:72:D9:C0:E3:4D:AD:70:36:00:4B:DA:2F:85:71:EC` — check with `apksigner verify --print-certs SecureShare.apk`.
 

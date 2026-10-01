@@ -74,14 +74,19 @@ void main() {
     app = await createServices(device: device, newCode: () => sendCode);
   });
 
-  testWidgets('receive from the PC, app in the background mid-transfer', (tester) async {
-    // ignore: avoid_print
-    print('E2E:RECEIVE_START'); // the runner starts the PC sender now
+  testWidgets('receive from the PC via an invitation link, app in the background mid-transfer', (tester) async {
     await tester.pumpWidget(SecureShareApp(services: app));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('tab-receive')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('code-input')), recvCode);
+    // ignore: avoid_print
+    print('E2E:RECEIVE_START'); // the runner starts the PC sender and opens https://…/r#<code> via Android
+    final field = find.byKey(const Key('code-input'));
+    final end = DateTime.now().add(const Duration(seconds: 60));
+    while (field.evaluate().isEmpty || tester.widget<TextField>(field).controller!.text != recvCode) {
+      if (DateTime.now().isAfter(end)) fail('the invitation link did not fill in the code');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+    }
+    expect(find.byKey(const Key('invite-hint')), findsOneWidget);
     await tester.tap(find.byKey(const Key('receive')));
     await confirmCode(tester);
     // ignore: avoid_print

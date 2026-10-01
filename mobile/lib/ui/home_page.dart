@@ -23,6 +23,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _tab = 0;
   int _seenShares = 0;
+  int _seenInvites = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +36,10 @@ class _HomePageState extends State<HomePage> {
         if (c.sharedFileCount != _seenShares) {
           _seenShares = c.sharedFileCount;
           _tab = 0; // a file shared from another app → Send
+        }
+        if (c.inviteCount != _seenInvites) {
+          _seenInvites = c.inviteCount;
+          _tab = 1; // an invitation link → Receive
         }
         final error = c.error;
         if (error != null) {

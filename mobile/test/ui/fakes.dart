@@ -19,6 +19,24 @@ import 'package:secureshare/ui/app.dart';
 class FakeDevice implements Device {
   PickedFile? nextPick;
   PickedFile? shared;
+  String? link;
+  final _link = StreamController<void>.broadcast();
+
+  /// The app is opened with [url] while running (like tapping the link).
+  void openLink(String url) {
+    link = url;
+    _link.add(null);
+  }
+
+  @override
+  Future<String?> takeOpenedLink() async {
+    final l = link;
+    link = null;
+    return l;
+  }
+
+  @override
+  Stream<void> get linkOpened => _link.stream;
   bool storageGranted = true;
   final released = <int>[];
   final services = <String>[]; // 'start: text', 'update: text', 'stop'

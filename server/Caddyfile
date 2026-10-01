@@ -71,6 +71,26 @@ secureshare-relay.duckdns.org {
 		redir https://github.com/artmarchenko/SecureShare/releases/latest 302
 	}
 
+	# Android App Links: lets invitation links open the app directly.
+	# Must match mobile/android/release-cert.sha256 (tests check it).
+	handle /.well-known/assetlinks.json {
+		header Content-Security-Policy "default-src 'none'"
+		header Content-Type "application/json"
+		root * /www
+		rewrite * /assetlinks.json
+		file_server
+	}
+
+	# Invitation page /r#<code> (the code stays in the fragment, never sent here)
+	handle /r {
+		header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'"
+		header Cache-Control "no-cache"
+		header X-Robots-Tag "noindex"
+		root * /www
+		rewrite * /r.html
+		file_server
+	}
+
 	# WebSocket relay — proxy only WS connections
 	@websocket {
 		header Connection *Upgrade*

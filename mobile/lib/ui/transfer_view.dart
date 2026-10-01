@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../app/controller.dart';
 import '../app/i18n.dart';
+import '../app/invite.dart';
 import '../transfer/status.dart';
 import 'app.dart';
 import 'send_tab.dart' show CodeText;
@@ -139,7 +140,8 @@ class _SessionCodeCard extends StatelessWidget {
                 ),
                 TextButton.icon(
                   key: const Key('share-code'),
-                  onPressed: () => app.device.shareText(s.t('m_share_code_text', {'code': code})),
+                  onPressed: () =>
+                      app.device.shareText(s.t('m_share_code_text', {'code': code, 'link': inviteLink(code)})),
                   icon: const Icon(Icons.share),
                   label: Text(s.t('m_share')),
                 ),
