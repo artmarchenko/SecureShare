@@ -1,172 +1,109 @@
 # SecureShare
 
-**Secure end-to-end encrypted file sharing** — a standalone .exe for transferring files securely between two computers over the internet.
+**End-to-end encrypted file transfer between two computers** — a standalone app for Windows and Linux. No registration, no cloud storage, no network configuration.
 
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-3.3.1-green)
+![Version](https://img.shields.io/badge/version-4.0.0-green)
 
-## What is it
+## What it is
 
-SecureShare is a desktop application with a graphical interface for one-time secure file transfers between two users. No registration, no network configuration, no white IP addresses required.
+SecureShare sends one file from one person to another over the internet. Both sides run the app; the sender gets a session code, tells it to the receiver, both compare a short verification code, and the file travels encrypted through a relay server that only ever sees ciphertext.
 
 ### Key Features
 
-- **End-to-End Encryption** — X25519 (ECDH) + AES-256-GCM
-- **VPS Relay** — dedicated relay server with automatic TLS (Let's Encrypt)
-- **MITM Verification** — visual security code comparison
-- **SHA-256 Integrity** — hash verification after transfer
-- **Auto-Reconnect & Resume** — transfers survive network interruptions
-- **Auto-Update** — checks for new versions on startup with SHA-256 verification
-- **Built-in Diagnostics** — connectivity and server health checks
-- **Cross-platform** — Windows (.exe) and Linux binaries; no installation needed
-- **5 GB session limit** — per-session data transfer cap
+- **End-to-end encryption** — X25519 key exchange + AES-256-GCM
+- **Relay that learns nothing** — it never receives the session code, the file, its name or its size in clear
+- **MITM-resistant verification** — commit-then-reveal key exchange + 8-character code (40 bits) both users compare; a compromised relay gets one blind guess
+- **Integrity** — every frame authenticated, whole-file SHA-256 check
+- **Resume & auto-reconnect** — transfers survive network drops and app restarts (7 days)
+- **Signed auto-update** — updates are installed only if their checksums carry the author's Ed25519 signature
+- **Never overwrites** — a file with the same name is saved as `name (1).ext`
+- **Languages** — Ukrainian, English, German
+- **Diagnostics & privacy switches** — connectivity checks; crash reports (on by default) and transfer statistics (opt-in) can be toggled
+- **Up to 5 GB per session**
 
 ## How to Use
 
-### Sender
+**Sender**
+1. Launch SecureShare, choose a file, click **Send**
+2. Tell the receiver the session code (e.g. `a7f3-bc21`)
+3. Compare the verification code (e.g. `K7PQ-2XMA`) with the receiver — by voice or in a messenger — and confirm
 
-1. Launch `SecureShare.exe`
-2. Select a file
-3. Click "Send" — a session code will be generated (e.g. `a7f3-bc21`)
-4. Share the session code with the receiver
-5. Compare the verification code
-6. Wait for the transfer to complete
+**Receiver**
+1. Launch SecureShare, open **Receive**, enter the session code, choose a folder, click **Receive**
+2. Compare the verification code and confirm; the file is saved when the transfer completes
 
-### Receiver
-
-1. Launch `SecureShare.exe`
-2. Enter the session code from the sender
-3. Choose a save directory
-4. Click "Receive"
-5. Compare the verification code
-6. Wait for the file to be saved
+> Both sides need SecureShare **4.0 or newer** — 4.x cannot connect to 3.x.
 
 ## How It Works
 
 ```
-Sender                          VPS Relay                     Receiver
-  |                               |                              |
-  |-- 1. Connect (WSS) --------->|                              |
-  |                               |<-------- Connect (WSS) -----|
-  |                               |                              |
-  |-- 2. X25519 key exchange --->|--- relay encrypted bytes --->|
-  |<- (derive shared AES key) ---|--- relay encrypted bytes ---|
-  |                               |                              |
-  |-- 3. Verification code ----->|                              |
-  |   (user confirms match)      |    (user confirms match)     |
-  |                               |                              |
-  |-- 4. E2E encrypted file ====>|====== relay raw bytes =====>|
-  |   AES-256-GCM chunks         |                              |
-  |                               |                              |
-  |-- 5. SHA-256 verify -------->|<------- SHA-256 result ------|
-  |                               |                              |
+Sender                              Relay (sees only room ID + ciphertext)          Receiver
+  │── room ID = HKDF(scrypt(code)) ─────►│◄─────────────────────── room ID ──────────│
+  │── commit = H(sender key) ───────────►│──────────────────────────────────────────►│
+  │◄─────────────────────────────────────│◄─────────────────────── receiver key ─────│
+  │── reveal sender key ────────────────►│──────────────────────────────────────────►│  checks commitment
+  │   both derive the AES key and show the same 8-character code → users compare    │
+  │══ AES-256-GCM chunks (authenticated chunk numbers) ═════════════════════════════►│
+  │◄──────────────────────────────────────────────────────── SHA-256 verified ───────│
 ```
 
-### Architecture
+| Component | Technology |
+|-----------|------------|
+| Client | Python + CustomTkinter |
+| Relay server | Python + websockets (Docker) |
+| TLS | Caddy + Let's Encrypt |
+| Hosting | Oracle Cloud (Always Free) |
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Client | Python + CustomTkinter | GUI, encryption, transfer logic |
-| Relay Server | Python + websockets | Session management, byte relay |
-| TLS | Caddy + Let's Encrypt | Automatic HTTPS/WSS |
-| Hosting | Oracle Cloud (ARM VM) | Free-tier VPS |
-| DNS | DuckDNS | Free dynamic DNS |
+Details: [DEVELOPER.md](DEVELOPER.md) (protocol, threat model, CI/CD) · [USER_GUIDE.md](USER_GUIDE.md) (Ukrainian user guide).
+
+## Security
+
+| What | How |
+|------|-----|
+| Key exchange | X25519, fresh keys per connection |
+| Encryption | AES-256-GCM; AAD binds room, author role, frame type and chunk number |
+| MITM | commit-then-reveal + 40-bit verification code bound to both public keys |
+| Session code | never sent; the relay gets an scrypt-derived room ID |
+| Reconnect | proof under the previous session key over the new keys (no bearer token) |
+| Updates | Ed25519-signed `SHA256SUMS.txt`, fail-closed |
+
+**What the relay cannot do:** read or change your file, learn its name, learn the session code, or impersonate the other side without the users noticing a code mismatch.
+**What it can do:** see that two IP addresses exchanged some amount of data, or refuse to relay.
+**What you must do:** actually compare the verification code.
+
+### Limitations
+
+- Maximum 5 GB per session; one file per session (use an archive for several)
+- Both devices need internet access at the same time
+- Windows and Linux builds; macOS: run from source
 
 ## Development
 
-### Requirements
-
-- Python 3.11+
-- Windows 10/11 or Linux (64-bit)
-
-### Install Dependencies
-
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # app + server + test dependencies
+python main.py                        # run from source
+python -m pytest                      # full test suite (unit, server, integration, adversarial, UI)
+python build.py                       # dist/SecureShare.exe (Windows) or dist/SecureShare (Linux)
 ```
 
-### Run from Source
-
-```bash
-python main.py
-```
-
-### Build
-
-```bash
-python build.py
-```
-
-Result: `dist/SecureShare.exe` (Windows) or `dist/SecureShare` (Linux)
+Every push runs the tests on Windows and Linux; releases are built only from a green suite and are signed. See [DEVELOPER.md](DEVELOPER.md).
 
 ## Project Structure
 
 ```
-fileshare/
-├── app/
-│   ├── config.py          # Configuration (VPS URL, limits, version, links)
-│   ├── crypto_utils.py    # X25519, AES-256-GCM, HKDF, signaling crypto
-│   ├── gui.py             # CustomTkinter GUI + transfer orchestration
-│   ├── ws_relay.py        # VPS WebSocket relay sender/receiver
-│   ├── updater.py         # Auto-update: check, download, verify, install
-│   └── telemetry.py       # Crash reports + anonymous analytics (opt-in)
-├── server/
-│   ├── relay_server.py    # VPS relay server + HTTP API (Python + websockets)
-│   ├── analytics.py       # Analytics, crash store, rate limiting
-│   ├── Dockerfile         # Docker image for relay server
-│   ├── docker-compose.yml # Docker Compose (relay + Caddy)
-│   ├── Caddyfile          # Caddy reverse proxy + auto-TLS
-│   ├── test_relay.py      # Server test suite (16+ tests)
-│   ├── DEPLOY.md          # Deployment instructions (Oracle Cloud)
-│   └── www/               # Landing page + admin dashboard
-├── main.py                # Entry point
-├── build.py               # PyInstaller build script (Win + Linux)
-├── requirements.txt       # Python dependencies
-├── SecureShare.spec       # PyInstaller spec (Windows)
-├── SecureShare-linux.spec # PyInstaller spec (Linux)
-├── version_info.txt       # .exe metadata (version, publisher)
-└── LICENSE                # MIT License
+app/            client: crypto_utils, ws_relay, gui, ui/, diagnostics, updater, telemetry, i18n, lang/
+server/         relay_server, analytics, Docker/Caddy config, landing page (www/)
+tests/          pytest suites: unit, server, integration, adversarial, ui
+scripts/        regression guard, release signing, UI screenshots
+main.py         entry point (--self-test for packaged builds)
+build.py        PyInstaller build (Windows + Linux)
 ```
-
-## Security
-
-### Cryptography
-
-| Component | Algorithm | Purpose |
-|-----------|-----------|---------|
-| Key Exchange | X25519 (ECDH) | Key agreement without secret transmission |
-| Encryption | AES-256-GCM | Authenticated encryption with AAD |
-| KDF | HKDF-SHA256 | Key derivation |
-| Nonce | Counter + prefix | Nonce reuse prevention |
-| Integrity | SHA-256 | File integrity verification |
-| Signaling | AES-256-GCM (pre-shared) | Session metadata encryption |
-| Transport | TLS 1.2+ (WSS) | Transport layer encryption |
-
-### Attack Mitigations
-
-- **MITM** — mandatory security code verification
-- **Replay** — counter-based nonces with unique prefix
-- **Cross-session** — session code as AAD in AES-GCM
-- **Eavesdropping** — E2E encryption; relay server sees only ciphertext
-- **Server compromise** — server never has access to plaintext data
-
-### Limitations
-
-- Maximum **5 GB per session** (server-enforced limit)
-- One file per session (use archives for multiple files)
-- Both devices must have internet access
-- Session codes are single-use
-- macOS is not officially supported (run from source)
 
 ## Logs
 
-Application logs are saved to:
-```
-%APPDATA%\SecureShare\secureshare.log
-```
-
-Use the built-in "Copy Log" or "Save Log" buttons for diagnostics.
+`%APPDATA%\SecureShare\secureshare.log` on Windows. The **Copy log** / **Save log** buttons help with support requests.
 
 ## Author
 

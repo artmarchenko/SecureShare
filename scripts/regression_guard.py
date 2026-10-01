@@ -91,13 +91,18 @@ def check_version_sync() -> None:
     filevers = _find(r"filevers=\((\d+,\s*\d+,\s*\d+),\s*0\)", version_info, "version_info.txt")
     version_info_version = ".".join(part.strip() for part in filevers.split(","))
 
-    if len({app_version, latest_version, version_info_version}) != 1:
-        raise AssertionError(
-            "Version mismatch: "
-            f"APP_VERSION={app_version}, "
-            f"LATEST_CLIENT_VERSION={latest_version}, "
-            f"version_info={version_info_version}"
-        )
+    readme_version = _find(r"badge/version-([0-9]+\.[0-9]+\.[0-9]+)-", _read("README.md"), "README.md")
+    developer_version = _find(r"\*\*Version:\*\* ([0-9]+\.[0-9]+\.[0-9]+)", _read("DEVELOPER.md"), "DEVELOPER.md")
+
+    versions = {
+        "APP_VERSION": app_version,
+        "LATEST_CLIENT_VERSION": latest_version,
+        "version_info": version_info_version,
+        "README badge": readme_version,
+        "DEVELOPER.md": developer_version,
+    }
+    if len(set(versions.values())) != 1:
+        raise AssertionError("Version mismatch: " + ", ".join(f"{k}={v}" for k, v in versions.items()))
 
 
 def check_server_invariants() -> None:

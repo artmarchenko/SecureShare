@@ -2,7 +2,7 @@
 
 > Comprehensive technical documentation for developers, auditors, and contributors.
 >
-> **Version:** 3.3.1 · **Architecture:** VPS-only relay · **Author:** Artem Marchenko
+> **Version:** 4.0.0 · **Protocol:** v2 · **Architecture:** E2E encrypted, relay-based · **Author:** Artem Marchenko
 
 ---
 
@@ -36,8 +36,8 @@ SecureShare is a desktop application for **one-time secure file transfers** betw
 | **Zero-knowledge relay** | Server never sees plaintext; all data is E2E encrypted |
 | **Minimal trust** | Users verify connection via visual security code (anti-MITM) |
 | **Single binary** | Distributed as a standalone `.exe` (Win) or binary (Linux) — no installation needed |
-| **Ephemeral sessions** | Session codes are single-use, rooms auto-expire after 30 min |
-| **Defense in depth** | TLS transport + E2E encryption + signaling encryption + integrity check |
+| **Ephemeral sessions** | Relay rooms exist only while both peers are connected (auto-expire after 30 min) |
+| **Defense in depth** | TLS + E2E encryption + commit-then-reveal verification + signed updates |
 
 ### How It Works (User Perspective)
 
@@ -120,11 +120,16 @@ fileshare/
 ├── app/                          # Client application
 │   ├── __init__.py
 │   ├── config.py                 # Constants: URLs, limits, version, protocol
-│   ├── crypto_utils.py           # X25519, AES-256-GCM, HKDF, signaling crypto
-│   ├── gui.py                    # CustomTkinter GUI + transfer orchestration
-│   ├── ws_relay.py               # VPS WebSocket relay sender/receiver
-│   ├── updater.py                # Auto-update: check, download, verify, install
-│   └── telemetry.py              # Crash reporting + anonymous session analytics
+│   ├── crypto_utils.py           # Protocol v2 crypto: scrypt/HKDF secrets, X25519, AES-GCM, commitments
+│   ├── ws_relay.py               # Sender/receiver: handshake, transfer, resume, auto-reconnect
+│   ├── gui.py                    # Main window + send/receive workflows
+│   ├── ui/                       # Dialogs: verify, diagnostics, update, help
+│   ├── diagnostics.py            # Connectivity checks (no GUI)
+│   ├── format.py                 # Human-readable sizes/speeds/ETA
+│   ├── i18n.py + lang/*.json     # uk / en / de
+│   ├── updater.py                # Auto-update: signed checksums, download, verify, install
+│   ├── telemetry.py              # Crash reports (default on) + transfer stats (opt-in)
+│   └── selftest.py               # `--self-test` for packaged builds
 │
 ├── server/                       # Relay server (deployed to VPS)
 │   ├── relay_server.py           # Async WebSocket relay + HTTP API (Python + websockets)
@@ -133,7 +138,7 @@ fileshare/
 │   ├── docker-compose.yml        # Services: relay + caddy + volumes
 │   ├── Caddyfile                 # Reverse proxy + auto-TLS + security headers
 │   ├── requirements.txt          # Server dependencies (websockets)
-│   ├── test_relay.py             # Server test suite (16+ tests)
+│   ├── test_relay.py             # Live smoke tests against the production relay
 │   ├── DEPLOY.md                 # Manual deployment guide
 │   └── www/                      # Static web content (mounted in Caddy)
 │       ├── index.html            # Landing page
@@ -144,8 +149,11 @@ fileshare/
 │   ├── SecureShare.ico           # Multi-size icon (16–256px)
 │   └── icon_32.png               # 32×32 icon for window/taskbar
 │
-├── .github/workflows/            # CI/CD (4 independent workflows)
-│   ├── ci.yml                    # Lint + import check (on push to app code)
+├── tests/                        # pytest: unit, server, integration, adversarial, ui
+├── scripts/                      # regression_guard, release_signing, ui_screenshots
+├── .github/workflows/            # CI/CD
+│   ├── ci.yml                    # Lint + guard + import check
+│   ├── tests.yml                 # pytest on Windows + Linux, UI screenshots
 │   ├── release.yml               # Build Win+Linux + GitHub Release (on v* tag)
 │   ├── deploy-web.yml            # Deploy landing page (on push to server/www/)
 │   └── deploy-server.yml         # Deploy relay server (on push to server/*.py)
@@ -166,137 +174,78 @@ fileshare/
 
 ## 3. Security Model
 
-### 3.1. Encryption Layers
+The design goal is that a **compromised relay** (VPS, Caddy, TLS termination —
+anyone in the middle of the WebSocket) can disrupt transfers but can neither
+read nor undetectably modify them, provided the two users compare the
+verification code.
 
-SecureShare implements **three independent encryption layers**:
-
-```
-Layer 3:  TLS 1.2+  (transport) ─── Caddy ↔ Client
-Layer 2:  Signaling Encryption ──── Pre-shared key from session code
-Layer 1:  E2E Encryption ────────── X25519 + AES-256-GCM
-```
-
-Even if one layer is compromised, the others provide protection:
-- **TLS compromised?** → Signaling and E2E encryption still protect data
-- **Signaling key guessed?** → E2E encryption still protects file content
-- **Server compromised?** → Server never has E2E keys; sees only ciphertext
-
-### 3.2. Cryptographic Algorithms
-
-| Component | Algorithm | Key Size | Purpose |
-|-----------|-----------|----------|---------|
-| Key Exchange | X25519 (ECDH) | 256-bit | Asymmetric key agreement |
-| Key Derivation | HKDF-SHA256 | 256-bit output | Derive AES key from shared secret |
-| Data Encryption | AES-256-GCM | 256-bit | Authenticated encryption |
-| Signaling Encryption | AES-256-GCM | 256-bit | Protect key exchange messages |
-| Signaling Key | HKDF-SHA256 | 256-bit | Derive from session code |
-| Integrity | SHA-256 | 256-bit | File hash verification after transfer |
-| Nonce | Counter + Prefix | 96-bit | Prevent nonce reuse |
-
-### 3.3. Key Exchange Flow
+### 3.1. Layers
 
 ```
-                   Sender                                  Receiver
-                     │                                        │
-                     │ 1. Generate X25519 key pair            │ 1. Generate X25519 key pair
-                     │                                        │
-                     │ 2. Derive signaling key from           │ 2. Derive signaling key from
-                     │    session code (HKDF)                 │    session code (HKDF)
-                     │                                        │
-                     │ 3. Send: signaling_encrypt({           │
-                     │      type: "pub_key",                  │
-                     │      key: <X25519 pub>,                │
-                     │      protocol_version: 1,              │
-                     │      app_version: "3.3.x",             │
-                     │      reconnect_token: <opt>            │
-                     │    }) ─────────────────────────────────►│
-                     │                                        │
-                     │◄─────────────────────────────────────── │ 3. Send: signaling_encrypt({
-                     │                                        │      type: "pub_key",
-                     │                                        │      key: <X25519 pub>,
-                     │                                        │      ...
-                     │                                        │    })
-                     │                                        │
-                     │ 4. ECDH: private × peer_pub            │ 4. ECDH: private × peer_pub
-                     │    → raw shared secret                 │    → raw shared secret
-                     │                                        │
-                     │ 5. HKDF(secret, salt=session_code,     │ 5. HKDF(secret, salt=session_code,
-                     │         info="secureshare-v2-aes")     │         info="secureshare-v2-aes")
-                     │    → AES-256 key (identical both)      │    → AES-256 key (identical both)
-                     │                                        │
-                     │ 6. Nonce prefix assignment:             │ 6. Nonce prefix assignment:
-                     │    lower pub key → prefix 0            │    higher pub key → prefix 1
-                     │    (prevents nonce collision)           │    (prevents nonce collision)
-                     │                                        │
+Layer 3:  TLS 1.2+ (transport) ───── client ↔ Caddy
+Layer 2:  Signaling encryption ───── key from the session code (scrypt)
+Layer 1:  E2E encryption ─────────── X25519 + AES-256-GCM, commit-then-reveal
 ```
 
-### 3.4. Nonce Construction
+The relay only ever holds `room_id` (derived from the code) and ciphertext.
 
-Each nonce is 12 bytes (96 bits), constructed as:
+### 3.2. Cryptographic Algorithms (protocol v2, since 4.0)
 
-```
-┌──────────────┬──────────────────────────────┐
-│ Prefix (4B)  │     Counter (8B, big-endian) │
-│   0 or 1     │     incrementing per message │
-└──────────────┴──────────────────────────────┘
-```
+| Component | Algorithm | Notes |
+|-----------|-----------|-------|
+| Code → master secret | scrypt (N=2¹⁵, r=8, p=1), salt `secureshare-p2\|code` | ~0.1 s / 32 MiB once per transfer; makes offline guessing expensive |
+| Room ID | HKDF-SHA256(master, `…\|room`) → 16 bytes hex | the only thing the relay sees |
+| Signaling key | HKDF-SHA256(master, `…\|signaling`) | AES-256-GCM, random nonce |
+| Key exchange | X25519 | fresh key pair per connection |
+| Commitment | SHA-256(`…\|commit` ‖ sender_pub ‖ 32-byte opening) | sender commits before seeing the receiver's key |
+| Data key | HKDF-SHA256(DH secret, salt = master, info = `…\|data-key\|` ‖ transcript) | transcript = sender_pub ‖ receiver_pub |
+| Verification code | HKDF(data key, `…\|sas\|` ‖ transcript) → 5 bytes → base32 `XXXX-XXXX` | 40 bits |
+| Data encryption | AES-256-GCM | nonce = role prefix (sender 0, receiver 1) ‖ 64-bit counter |
+| Reconnect proof | HMAC-SHA256(previous data key, `…\|reconnect\|` ‖ author role ‖ new transcript) | replaces the v1 bearer token |
+| Integrity | SHA-256 of the whole file | checked after the last chunk |
+| Update trust | Ed25519 signature over `SHA256SUMS.txt` | see 12.3 |
 
-- **Prefix** is determined by comparing raw public keys: the peer with the lexicographically "lower" key gets prefix `0`, the other gets `1`
-- This ensures **the same (key, nonce) pair is never used twice**, even though both peers share the same AES key
-- Counter is 64-bit, allowing up to 2^64 messages per session (practically unlimited)
+### 3.3. Why Commit-then-Reveal
 
-### 3.5. Signaling Encryption
+With a short authentication string (the verification code), a relay that
+substitutes keys could otherwise try many fake key pairs until both users see
+the same code (v1: 32-bit code, ~2¹⁶ attempts per side — under a second).
+In v2 the sender publishes `commit = H(sender_pub ‖ opening)` first, the
+receiver answers with its key, and only then the sender reveals its key.
+A relay must fix its substitute keys before it learns the honest ones, so it
+gets **one blind guess**: success probability 2⁻⁴⁰. A revealed key that does
+not match the commitment aborts the transfer (`relay_commit_mismatch`) without
+asking the user and without retrying.
 
-Before E2E keys are established, signaling messages (public key exchange, verification) are encrypted using a **pre-shared key** derived from the session code:
+### 3.4. Verification
 
-```python
-signaling_key = HKDF(
-    algorithm=SHA256,
-    length=32,
-    salt=b"secureshare-signaling-salt-v2",
-    info=b"secureshare-signaling-key",
-).derive(session_code.encode())
-```
+Both sides show the 8-character code (base32 letters A–Z and digits 2–7, e.g.
+`K7PQ-2XMA`). Users compare it over another channel (voice, messenger) and
+confirm; either side can reject, which aborts both. Unanswered dialogs close
+after `VERIFY_TIMEOUT` (120 s).
 
-This prevents an eavesdropper on the relay from seeing public keys, protecting against active MITM attacks where an attacker would substitute their own key.
+### 3.5. Associated Data (AAD)
 
-**Signaling encrypt/decrypt:**
-- Random 12-byte nonce (safe for few messages)
-- AAD: `b"secureshare-signaling-aad"` (fixed)
-- Output: `nonce (12B) || ciphertext + GCM tag (16B)`
+Every E2E frame binds: room ID ‖ **author role** ‖ frame type (`C` control,
+`D` data) ‖ for data frames the 4-byte chunk number. Consequences:
+- a frame cannot be moved to another session (room ID);
+- a frame reflected back to its author fails (author role);
+- chunks cannot be relabelled or reordered (chunk number).
 
-### 3.6. MITM Verification
+### 3.6. Reconnect Without Re-verification
 
-After key exchange, both peers compute a **verification code**:
+After a verified session each side keeps that session's key. On reconnect the
+new key exchange runs as usual, then both send a `session_proof`: an HMAC
+under the **previous** key over the **new** public keys and the author role.
+If the peer's proof verifies, the code is not asked again. A proof observed
+by the relay is useless in any other key exchange (different public keys) and
+cannot be reflected (role). On the first connection the proof is empty.
 
-```python
-code = SHA256(shared_key + b"secureshare-verify").hexdigest()[:8]
-# Displayed as: "E555-EB8B"
-```
+### 3.7. File Integrity
 
-Users compare this code verbally or through a separate channel. If codes don't match, a MITM attack is in progress, and the session is aborted.
-
-**Verification protocol:**
-1. Both peers display the code to their user
-2. User confirms → client sends `signaling_encrypt({"type": "verified"})`
-3. User rejects → client sends `signaling_encrypt({"type": "verify_reject"})`
-4. Both peers must confirm for transfer to proceed
-
-### 3.7. AAD Binding
-
-All E2E encrypted data uses the **session code as AAD** (Associated Authenticated Data) in AES-GCM:
-
-```python
-ciphertext = aes.encrypt(nonce, plaintext, session_code.encode())
-```
-
-This binds encrypted data to the specific session, preventing:
-- **Cross-session substitution**: ciphertext from session A cannot be replayed in session B
-- **Ciphertext manipulation**: any modification is detected by GCM authentication
-
-### 3.8. File Integrity
-
-After all chunks are received, the receiver computes `SHA-256` of the saved file and compares it to the sender's hash. This provides an independent integrity check beyond GCM authentication (which verifies individual chunks).
+After all chunks arrive the receiver hashes the `.part` file and compares it
+with the sender's SHA-256 (sent inside the encrypted channel); on mismatch
+the partial file is deleted.
 
 ---
 
@@ -304,173 +253,81 @@ After all chunks are received, the receiver computes `SHA-256` of the saved file
 
 ### 4.1. Frame Format
 
-Every WebSocket message has a 1-byte type prefix:
+Every WebSocket message has a 1-byte type prefix; the very first text message
+of a connection is the room ID.
+
+| Type | Hex | Payload |
+|------|-----|---------|
+| `S` | `0x53` | `nonce(12) ‖ AES-GCM(signaling_key, JSON)` |
+| `C` | `0x43` | `nonce(12) ‖ AES-GCM(data_key, JSON, aad=…‖role‖C)` |
+| `D` | `0x44` | `seq(4, BE) ‖ nonce(12) ‖ AES-GCM(data_key, flag‖zlib?(chunk), aad=…‖role‖D‖seq)` |
+
+Data chunks are 512 KiB; `flag` = `0x01` if zlib (level 1) saved more than
+64 bytes, else `0x00` + raw bytes.
+
+### 4.2. Handshake (signaling, JSON)
 
 ```
-┌────────┬──────────────────────────────────────┐
-│ Type   │ Payload                               │
-│ (1B)   │ (variable length)                     │
-└────────┴──────────────────────────────────────┘
+Sender                              Relay                    Receiver
+  │── room_id (text) ────────────────►│◄──────── room_id ───────│   paired by SHA-256(room_id)
+  │── S {commit, protocol_version, app_version} ──────────────►│
+  │◄──────────────── S {pub_key: receiver_pub, versions} ───────│
+  │── S {reveal: sender_pub, opening} ────────────────────────►│   receiver checks commitment
+  │── S {session_proof: mac|null} ────────────────────────────►│
+  │◄──────────────────────────────── S {session_proof} ────────│
+  │   both: data key, verification code                        │
+  │── S {verified | verify_reject} ◄──────────────────────────►│   (auto on valid proof)
 ```
 
-| Type Byte | Hex | Name | Description |
-|-----------|-----|------|-------------|
-| `S` | `0x53` | Signaling | Key exchange, verification (signaling-encrypted) |
-| `C` | `0x43` | Control | Metadata, ACKs, done signals (E2E encrypted) |
-| `D` | `0x44` | Data | File chunks (E2E encrypted + compressed) |
+Version check: every first message carries `protocol_version`; a peer below
+`MIN_PROTOCOL_VERSION` (= 2) or above ours is refused for good. v1 clients
+(≤ 3.x) send the raw code as room name, so they never meet a v2 client — a v2
+client whose peer never arrives shows `relay_peer_version_hint`.
 
-### 4.2. Signaling Frame (`0x53`)
-
-```
-┌──────┬──────────────────────────────────────────────┐
-│ 0x53 │ signaling_encrypt(JSON payload)               │
-│ (1B) │ = nonce(12B) + encrypted(JSON + GCM tag 16B) │
-└──────┴──────────────────────────────────────────────┘
-```
-
-JSON payload types:
-- `{"type": "pub_key", "key": "<base64>", "protocol_version": 1, "app_version": "3.3.x", "reconnect_token": "<base64>"}` *(reconnect_token is optional, present on reconnect)*
-- `{"type": "verified"}`
-- `{"type": "verify_reject"}`
-
-### 4.3. Control Frame (`0x43`)
-
-```
-┌──────┬────────────────────────────────────┐
-│ 0x43 │ e2e_encrypt(JSON payload)          │
-│ (1B) │ = nonce(12B) + encrypted(JSON+tag) │
-└──────┴────────────────────────────────────┘
-```
-
-JSON payload types:
+### 4.3. Control Messages (`C`)
 
 | Type | Direction | Fields |
 |------|-----------|--------|
-| `relay_meta` | Sender → Receiver | `name`, `size`, `sha256`, `chunk_size`, `total_chunks`, `transfer_id` |
-| `relay_meta_ack` | Receiver → Sender | `resume` (bool, opt), `received_chunks` (list, opt) |
-| `relay_done` | Sender → Receiver | `sha256`, `total_chunks` |
-| `relay_done_ack` | Receiver → Sender | `verified` (bool) |
-| `relay_retransmit` | Receiver → Sender | `missing` (list of chunk indices) |
+| `relay_meta` | S → R | `name`, `size`, `sha256`, `chunk_size`, `total_chunks`, `transfer_id` |
+| `relay_meta_ack` | R → S | `resume` (bool, opt), `received_chunks` (list, opt) |
+| `relay_done` | S → R | `sha256`, `total_chunks` (must equal the validated value) |
+| `relay_retransmit` | R → S | `missing` (≤ 1000 chunk numbers per message) |
+| `relay_done_ack` | R → S | `verified` (bool) |
 
-### 4.4. Data Frame (`0x44`)
+Receiver-side validation of `relay_meta`: the name is reduced to its last
+component (`/` and `\` on every OS), `: * ? " < > |` and control characters
+become `_`, reserved Windows device names get a `_` prefix; size must be a
+positive int ≤ 5 GiB; unreasonable `chunk_size` falls back to 512 KiB;
+`total_chunks` is recomputed from the size. An existing file is never
+overwritten — the new one is saved as `name (1).ext`, `name (2).ext`, …
 
-```
-┌──────┬────────────┬────────────────────────────────────────┐
-│ 0x44 │ seq (4B BE)│ e2e_encrypt(compressed_chunk)          │
-│ (1B) │            │ = nonce(12B) + encrypted(data+tag 16B) │
-└──────┴────────────┴────────────────────────────────────────┘
-```
-
-- **seq**: 4-byte big-endian sequence number (chunk index)
-- **Compression**: zlib level 1, with flag byte:
-  - `0x01` + compressed data (if compression saved >64 bytes)
-  - `0x00` + raw data (otherwise)
-- **Chunk size**: 512 KB (configurable via `VPS_CHUNK_SIZE`)
-
-### 4.5. Transfer Sequence Diagram
+### 4.4. Sequence
 
 ```
-Sender                        VPS Relay                      Receiver
-  │                              │                               │
-  │── session_code (text) ──────►│                               │
-  │                              │◄── session_code (text) ───────│
-  │                              │  (paired by SHA-256 hash)     │
-  │                              │                               │
-  │── [S] pub_key+version ──────►│──────────────────────────────►│
-  │◄─────────────────────────────│◄── [S] pub_key+version ──────│
-  │  (both derive shared key)    │                               │
-  │                              │                               │
-  │── [S] verified ─────────────►│──────────────────────────────►│
-  │◄─────────────────────────────│◄── [S] verified ─────────────│
-  │                              │                               │
-  │── [C] relay_meta ───────────►│──────────────────────────────►│
-  │◄─────────────────────────────│◄── [C] relay_meta_ack ───────│
-  │                              │                               │
-  │── [D] chunk 0 ──────────────►│──────────────────────────────►│
-  │── [D] chunk 1 ──────────────►│──────────────────────────────►│
-  │── [D] chunk 2 ──────────────►│──────────────────────────────►│
-  │   ...                        │                               │
-  │── [D] chunk N ──────────────►│──────────────────────────────►│
-  │                              │                               │
-  │── [C] relay_done ───────────►│──────────────────────────────►│
-  │                              │                               │ (SHA-256 verify)
-  │◄─────────────────────────────│◄── [C] relay_done_ack ───────│
-  │                              │                               │
-  │  (connection closes)         │  (room cleaned up)            │
+Sender                         Relay                        Receiver
+  │── C relay_meta ───────────────►│──────────────────────────────►│
+  │◄──────────────────────────────│◄──── C relay_meta_ack (+resume)│
+  │── D chunk 0..N ───────────────►│──────────────────────────────►│  (disk writes on a background thread)
+  │── C relay_done ───────────────►│──────────────────────────────►│
+  │◄──────────────────────────────│◄──── C relay_retransmit [..]   │  (if chunks missing, ≤ 5 rounds)
+  │◄──────────────────────────────│◄──── C relay_done_ack(verified)│
 ```
 
-### 4.6. Version Negotiation
+### 4.5. Resume
 
-During key exchange, both peers include `protocol_version` and `app_version` in the signaling message. Compatibility check:
+The receiver keeps `<name>.part` plus `<name>.part.resume` (JSON: transfer id =
+SHA-256(name|size|sha256)[:32], chunk size, received chunk list, timestamp),
+saved every 64 chunks and on interruption. A later transfer of the same file
+(any session code) with a matching transfer id reuses the `.part`; the ACK
+lists the chunks the sender can skip. Manifests expire after 7 days.
 
-```
-If peer.protocol_version < our MIN_PROTOCOL_VERSION:
-    → Reject with error message ("update your app")
-If peer.protocol_version > our PROTOCOL_VERSION:
-    → Warning ("peer has newer version, consider updating")
-```
+### 4.6. Auto-Reconnect
 
-This ensures forward compatibility: newer clients can connect to older ones as long as protocol changes are backward-compatible.
-
-### 4.7. Retransmission
-
-After receiving `relay_done`, the receiver checks for missing chunks:
-
-1. If chunks are missing → send `relay_retransmit` with list of missing sequence numbers
-2. Sender retransmits the requested chunks
-3. Sender re-sends `relay_done`
-4. Repeat up to 5 rounds
-
-This handles packet loss or processing failures without requiring the full file to be re-sent.
-
-### 4.8. Resume Protocol (v3.1)
-
-If a transfer is interrupted (network loss, user cancel), the receiver saves a `.resume` manifest file alongside the `.part` temporary file. The manifest contains:
-
-```json
-{
-  "transfer_id": "<sha256(name|size|hash)[:32]>",
-  "file_name": "example.zip",
-  "file_size": 104857600,
-  "file_sha256": "abc...",
-  "chunk_size": 524288,
-  "total_chunks": 200,
-  "received_chunks": [0, 1, 2, 3, ...],
-  "timestamp": 1708000000.0
-}
-```
-
-On the next transfer of the **same file** (any session code):
-1. Sender includes `transfer_id` in `relay_meta`
-2. Receiver matches `transfer_id` against existing `.resume` manifest
-3. If matched → sends `relay_meta_ack` with `resume: true` and `received_chunks` list
-4. Sender skips already-received chunks
-5. Manifests auto-expire after 7 days (`RESUME_MAX_AGE`)
-
-### 4.9. Auto-Reconnect Protocol (v3.2)
-
-On connection loss **during an active transfer**, both sender and receiver automatically attempt to reconnect (up to `RECONNECT_MAX_RETRIES` attempts with exponential backoff).
-
-**Reconnect token** (identity proof across reconnects):
-```
-reconnect_token = HMAC-SHA256(shared_key, session_code + "secureshare-reconnect-v1")[:16]
-```
-
-After successful verification, both sides compute and store this token. On reconnect:
-
-1. Both peers independently detect the disconnect
-2. Wait with exponential backoff: 5s → 10s → 20s → 40s → 60s
-3. Reconnect to relay with the **same session code**
-4. New X25519 key exchange (includes `reconnect_token` in signaling message)
-5. If peer's `reconnect_token` matches our stored token → **auto-verify** (skip popup)
-6. If tokens don't match → full verification with user interaction
-7. Sender re-sends `relay_meta` → receiver responds with resume info → transfer continues
-
-**Security model:**
-- The reconnect token proves the peer participated in the original key exchange
-- An attacker would need the previous shared key to forge the token
-- The token is encrypted with the signaling key (derived from session code)
-- If the token doesn't match, full verification is required (safe fallback)
+On connection loss during a transfer both sides reconnect with exponential
+backoff (5, 10, 20, 40, 60 s; up to 5 attempts; Cancel interrupts the wait),
+redo the handshake (with session proofs → no dialog) and continue via resume.
+Attempts end as `SUCCESS`, `FATAL` (cancel, rejected code, invalid data,
+commitment mismatch, incompatible version) or `RETRY` (connection-level).
 
 ---
 
@@ -478,13 +335,15 @@ After successful verification, both sides compute and store this token. On recon
 
 ### 5.1. Module Responsibilities
 
-| Module | Lines | Responsibility |
-|--------|-------|---------------|
-| `config.py` | ~30 | Constants: relay URL, chunk size, version, limits, reconnect/resume |
-| `crypto_utils.py` | ~191 | All cryptography: X25519, AES-GCM, HKDF, signaling |
-| `ws_relay.py` | ~1280 | `VPSRelaySender` and `VPSRelayReceiver` with auto-reconnect + resume |
-| `gui.py` | ~1200 | CustomTkinter GUI, threading, transfer orchestration |
-| `main.py` | ~49 | Entry point, logging setup |
+| Module | Responsibility |
+|--------|---------------|
+| `crypto_utils.py` | Session secrets from the code, commitments, `CryptoSession` (keys, SAS, AAD, reconnect proofs) |
+| `ws_relay.py` | `_RelayPeer` (reconnect loop, handshake, cancel), `VPSRelaySender`, `VPSRelayReceiver` (`_on_meta` / `_on_data` / `_on_done`, `_DiskWriter`), typed `TransferState` |
+| `gui.py` | Main window, send/receive workflows; state indicator driven by `on_state` |
+| `ui/*.py` | Verification, diagnostics (+ privacy switches), update and help windows |
+| `diagnostics.py` | Internet (1.1.1.1:443), DNS, TLS, WebSocket (HTTPS fallback), latency |
+| `updater.py` | GitHub Releases check, signed-checksum verification, extraction, install |
+| `telemetry.py` | Anonymous crash reports (default on) and transfer stats (opt-in) |
 
 ### 5.2. Threading Model
 
@@ -542,10 +401,12 @@ After successful verification, both sides compute and store this token. On recon
 | Timestamped log | All events logged with `[HH:MM:SS]` timestamps |
 | Log copy/export | Buttons to copy log to clipboard or save to file |
 | Help dialog | Step-by-step instructions with colored sections |
-| Diagnostics | 5-point connectivity check: Internet, DNS, TLS, WebSocket, Latency |
+| Diagnostics | 5-point connectivity check + privacy switches (crash reports, transfer statistics) |
 | Auto-update check | Silent check on startup + manual "🔄" button; download, verify SHA-256, rename→copy→launch |
 | Donate button | "❤️" button opens Ko-fi donation page |
-| Telemetry opt-in | Toggles in Diagnostics window for crash reports and anonymous analytics |
+| Privacy switches | Crash reports (default **on**) and transfer statistics (default off) in Diagnostics |
+| Same-name files | Never overwritten; saved as `name (1).ext` |
+| Verification timeout | Unanswered code dialog closes after 120 s |
 | Startup tips | Random informational/motivational messages on launch |
 | Cancel | Stops transfer at any point, closes connection |
 
@@ -568,7 +429,8 @@ The built-in diagnostics button runs these checks sequentially:
 The relay server is intentionally minimal:
 - **Zero knowledge**: never inspects, logs, or stores payload content
 - **Stateless relay**: session state is in-memory; analytics/crashes persist to JSONL on disk
-- **Session codes are hashed**: server stores `SHA-256(code)[:32]` — original code never in memory
+- **No session codes**: clients send a room ID derived from the code (scrypt + HKDF); the relay keys rooms by `SHA-256(room_id)[:32]`
+- **No IPs in logs**: log lines carry a daily-salted hash tag; IPs are only used in memory for rate limiting
 
 ### 6.2. Connection Lifecycle
 
@@ -577,9 +439,9 @@ Client connects (WSS)
   │
   ├─ Rate limit check (per IP) ── fail → close(4029)
   │
-  ├─ Receive session code (15s timeout) ── timeout → close
+  ├─ Receive room ID (15s timeout) ── timeout → close
   │
-  ├─ Hash session code → room_id
+  ├─ Hash room ID → room key
   │
   ├─ Join room
   │   ├─ Room doesn't exist → create room, wait for peer (5 min)
@@ -725,6 +587,12 @@ Push to main (app/**, main.py, build.py, server/*.py)
       └─ Import verification (all key modules)
 ```
 
+### 8.1b. Workflow: `tests.yml` (push / PR)
+
+pytest on `ubuntu-latest` (xvfb) and `windows-latest` with coverage `fail_under=75`, plus a
+`screenshots` job that uploads UI screenshots (3 languages × 5 screens) as artifacts.
+Also called by `release.yml` as a gate before building.
+
 ### 8.2. Workflow: `release.yml` (on `v*` tag)
 
 ```
@@ -733,7 +601,7 @@ Push tag v*
   ├─ lint (ubuntu) ─────────────┐
   │                              │
   ├─ server-tests (ubuntu) ─────┤ (needs: lint)
-  │   └─ 16+ tests vs live VPS  │
+  │   └─ live smoke tests (VPS) │
   │                              │
   ├─ build (windows) ───────────┤ (needs: lint)
   │   ├─ PyInstaller → .exe     │
@@ -747,6 +615,7 @@ Push tag v*
   │                              │
   ├─ release (ubuntu) ──────────┤ (needs: build + build-linux + server-tests)
   │   ├─ Generate SHA256SUMS    │
+  │   ├─ Sign it (Ed25519)      │
   │   ├─ Generate changelog     │
   │   ├─ Create GitHub Release  │
   │   └─ Attach Win + Linux     │
@@ -786,22 +655,23 @@ Push to main (server/*.py, Dockerfile, docker-compose.yml, Caddyfile)
 
 ### 8.5. Release Process
 
+Prerequisite: the `RELEASE_SIGNING_KEY` secret is set (12.3) — otherwise the
+release job fails on purpose.
+
 ```bash
-# 1. Bump version in config.py + version_info.txt
-# 2. Commit
-git commit -am "Bump version to 3.3.1"
-
+# 1. Bump the version in all three places (the regression guard checks they match):
+#    app/config.py APP_VERSION, version_info.txt (filevers/prodvers + strings),
+#    server/relay_server.py RELAY_LATEST_VERSION default
+# 2. Update CHANGELOG.md, open a PR, wait for CI, merge.
+#    Merging touches server/relay_server.py → deploy-server.yml rebuilds and
+#    restarts the relay (a few seconds). Check /health active_rooms first.
 # 3. Tag and push
-git tag v3.3.1
-git push origin main --tags
+git tag v4.0.0
+git push origin v4.0.0
 
-# 4. GitHub Actions handles:
-#    - Lint + test
-#    - Build .exe (Windows) + binary (Linux)
-#    - Generate SHA256SUMS.txt
-#    - Create GitHub Release with Win + Linux assets
-#    - Upload binaries to VPS /downloads
-#    (Server deploy is separate — only triggered by server code changes)
+# 4. release.yml: lint + guard → full test suite (Windows + Linux) → build
+#    .exe and Linux binary → --self-test on both → SHA256SUMS.txt → Ed25519
+#    signature → GitHub Release (+ .sig) → binaries to the VPS
 ```
 
 ### 8.6. Distribution
@@ -823,8 +693,8 @@ git push origin main --tags
 | `VPS_RELAY_URL` | `wss://secureshare-relay.duckdns.org` | Relay server WebSocket URL |
 | `VPS_MAX_FILE_SIZE` | `5 * 1024^3` (5 GiB) | UI warning threshold |
 | `VPS_CHUNK_SIZE` | `512 * 1024` (512 KB) | WebSocket chunk size |
-| `PROTOCOL_VERSION` | `1` | Current wire protocol version |
-| `MIN_PROTOCOL_VERSION` | `1` | Minimum compatible version |
+| `PROTOCOL_VERSION` | `2` | Current wire protocol version |
+| `MIN_PROTOCOL_VERSION` | `2` | Minimum compatible version (v1 refused) |
 | `SESSION_CODE_LENGTH` | `8` | Length of session code |
 | `RESUME_MANIFEST_EXT` | `".resume"` | Resume manifest file extension |
 | `RESUME_MAX_AGE` | `604800` (7 days) | Max age for resume manifests |
@@ -833,7 +703,7 @@ git push origin main --tags
 | `RECONNECT_BASE_DELAY` | `5` | Base delay (seconds, exponential backoff) |
 | `RECONNECT_MAX_DELAY` | `60` | Max delay cap (seconds) |
 | `APP_NAME` | `"SecureShare"` | Application name |
-| `APP_VERSION` | `"3.3.1"` | Application version |
+| `APP_VERSION` | `"4.0.0"` | Application version |
 | `HOMEPAGE_URL` | `"https://secureshare-relay.duckdns.org"` | Landing page URL |
 | `DONATE_URL` | `"https://ko-fi.com/secureshare"` | Donation page URL |
 | `GITHUB_URL` | `"https://github.com/artmarchenko/SecureShare"` | GitHub repository URL |
@@ -855,7 +725,7 @@ git push origin main --tags
 | `RELAY_LOG_FORMAT` | `text` | Log format: `text` or `json` |
 | `RELAY_DATA_DIR` | `/data` | Directory for analytics JSONL persistence |
 | `RELAY_ADMIN_KEY` | *(none)* | Secret key for admin API access |
-| `RELAY_LATEST_VERSION` | `"3.3.1"` | Reported as latest client version via `/api/version` |
+| `RELAY_LATEST_VERSION` | `"4.0.0"` | Reported as latest client version via `/api/version` (landing page only; the app asks GitHub) |
 | `TELEGRAM_BOT_TOKEN` | *(none)* | Telegram bot token for critical alerts |
 | `TELEGRAM_CHAT_ID` | *(none)* | Telegram chat ID for critical alerts |
 
@@ -1098,6 +968,7 @@ A compromised GitHub account or CDN therefore cannot push an update.
 |-----------|--------|------------|
 | **5 GB per session** | Server-enforced to prevent abuse on free VPS | Split large files; use archives |
 | **One file per session** | Protocol design for simplicity | Use ZIP/TAR for multiple files |
+| **4.x ↔ 3.x incompatible** | Protocol v2 cannot be downgraded safely | Both sides need 4.0+ |
 | **Windows & Linux** | macOS not officially supported | Run from source on macOS |
 | **Single relay server** | Architecture choice | Can deploy additional relays |
 | **No offline mode** | Relay-dependent architecture | Both users must be online |
@@ -1106,39 +977,36 @@ A compromised GitHub account or CDN therefore cannot push an update.
 
 ## 14. Threat Model
 
-### 14.1. What the Server Can See
+### 14.1. What the Relay (or Whoever Controls It) Can See
 
 | Data | Visible? | Notes |
 |------|----------|-------|
-| Client IP addresses | ✅ Yes | Needed for rate limiting |
-| Session code | ❌ No | Only SHA-256 hash stored in memory |
-| Public keys | ❌ No | Encrypted with signaling key |
-| File content | ❌ No | E2E encrypted (AES-256-GCM) |
-| File name/size | ❌ No | Encrypted in control frames |
-| Number of bytes relayed | ✅ Yes | Needed for session limit |
-| Connection timestamps | ✅ Yes | Standard logging |
+| Client IP addresses | ✅ in memory | rate limiting; log lines carry a daily-salted hash tag, not the IP |
+| Session code | ❌ | only `room_id` = HKDF(scrypt(code)); guessing the code from it costs one scrypt per guess |
+| Public keys, verification messages | ❌ | encrypted with the code-derived signaling key |
+| File content, name, size, hash | ❌ | E2E encrypted control/data frames |
+| Amount of data, timing, room pairing | ✅ | needed to relay and enforce the 5 GB limit |
 
 ### 14.2. Attack Scenarios
 
-| Attack | Protection | Residual Risk |
+| Attack | Protection | Residual risk |
 |--------|-----------|---------------|
-| **MITM (key substitution)** | Signaling encryption + verification code | User must actually compare codes |
-| **Replay attack** | Counter-based nonces + session AAD | None if protocol followed |
-| **Session hijacking** | Session code brute force: 36^8 ≈ 2.8 × 10^12 combinations | Impractical within session lifetime |
-| **DDoS on relay** | Rate limiting + fail2ban + iptables SYN protection | Oracle Always Free egress quota is finite (up to 10 TB/month); monitor usage |
-| **Server compromise** | E2E encryption — server never has keys | Attacker could disrupt but not decrypt |
-| **.exe decompilation** | Python bytecode visible; no secrets in binary | Relay URL, protocol visible; no secret keys |
-| **DNS spoofing** | TLS certificate pinning via Let's Encrypt | User trusts CA infrastructure |
+| **Relay substitutes keys (MITM)** | commit-then-reveal + 40-bit verification code bound to both keys | 2⁻⁴⁰ per attempt — **only if users actually compare the code** |
+| **Relay forces a reconnect and replays a token** | reconnect proof = MAC under the previous key over the new public keys and role | none known |
+| **Relay reorders, moves or reflects frames** | AAD: room ‖ author role ‖ frame type ‖ chunk number | transfer can be disrupted, not altered |
+| **Relay learns the session code** | code never sent; scrypt-derived room ID | offline guessing of a 36⁸ code space at one scrypt per guess |
+| **Malicious peer sends bad metadata** | name sanitising, size/chunk validation, no overwrite, SHA-256 check | — |
+| **Compromised GitHub account / CDN pushes an update** | Ed25519-signed `SHA256SUMS.txt`, fail-closed updater | theft of the signing key (primary in CI secret, backup offline) |
+| **DDoS on the relay** | rate limiting, fail2ban, iptables SYN limits | service availability; Oracle egress quota (10 TB/month) |
+| **Server compromise** | E2E encryption; relay holds no keys | can disrupt, cannot decrypt |
+| **Reverse engineering the .exe** | no secrets in the binary | relay URL and protocol are public by design |
 
-### 14.3. What an Attacker with the .exe Can Learn
+### 14.3. Not Protected Against
 
-| Extractable | Not Extractable |
-|------------|----------------|
-| Relay server URL (`wss://...`) | SSH keys to VPS |
-| Protocol version and wire format | Private encryption keys (generated per session) |
-| Encryption algorithms used | Session codes of other users |
-| Application version | Any transferred file content |
+- Users who confirm the verification code without comparing it.
+- Malware on either user's computer.
+- Traffic analysis (who talks to the relay when, and how much).
 
 ---
 
-*Last updated: February 2026 · v3.3.1*
+*Last updated: October 2026 · v4.0.0 · protocol v2*
