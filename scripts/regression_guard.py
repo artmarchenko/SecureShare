@@ -202,12 +202,22 @@ def check_app_i18n() -> None:
                 )
 
 
+def check_build_specs() -> None:
+    # Both PyInstaller specs must bundle the translations (the Linux spec
+    # once missed them and the binary showed raw message keys).
+    for spec in ("SecureShare.spec", "SecureShare-linux.spec"):
+        text = _read(spec)
+        if "('app/lang', 'lang')" not in text:
+            raise AssertionError(f"{spec}: app/lang is not bundled as 'lang'")
+
+
 def main() -> int:
     checks = [
         ("version-sync", check_version_sync),
         ("server-invariants", check_server_invariants),
         ("web-i18n-invariants", check_web_i18n_invariants),
         ("app-i18n", check_app_i18n),
+        ("build-specs", check_build_specs),
     ]
 
     failed = []
