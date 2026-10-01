@@ -45,6 +45,7 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
     private var pendingPick: MethodChannel.Result? = null
     private var pendingPermission: MethodChannel.Result? = null
     private var sharedFile: Map<String, Any?>? = null
+    private var selfTestRequested = false
     private class OpenFile(val pfd: ParcelFileDescriptor, val channel: FileChannel, val cacheCopy: File?)
     private val openFiles = mutableMapOf<Int, OpenFile>()
     private var nextHandle = 1
@@ -63,6 +64,12 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
     }
 
     fun onIntent(intent: Intent?) {
+        // `adb shell am start -n …/.MainActivity --ez selftest true` (release workflow smoke test)
+        if (intent?.getBooleanExtra("selftest", false) == true) {
+            intent.removeExtra("selftest")
+            selfTestRequested = true
+            channel.invokeMethod("selfTest", null)
+        }
         if (intent?.action != Intent.ACTION_SEND) return
         @Suppress("DEPRECATION")
         val uri = (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
@@ -87,6 +94,10 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                 )
             }
             "pickFile" -> pickFile(result)
+            "takeSelfTest" -> {
+                result.success(selfTestRequested)
+                selfTestRequested = false
+            }
             "takeSharedFile" -> {
                 result.success(sharedFile)
                 sharedFile = null

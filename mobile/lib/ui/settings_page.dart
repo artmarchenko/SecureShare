@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app/i18n.dart';
 import '../transfer/handshake.dart' show appVersion;
 import 'app.dart';
+import 'update_ui.dart';
 
 const githubUrl = 'https://github.com/artmarchenko/SecureShare';
 const donateUrl = 'https://ko-fi.com/secureshare';
@@ -60,6 +61,7 @@ class SettingsPage extends StatelessWidget {
             subtitle: Text('${s.t('m_version', {'version': appVersion})}\n${s.t('m_compat')}'),
             isThreeLine: true,
           ),
+          const UpdateTile(),
           ListTile(
             leading: const Icon(Icons.code),
             title: Text(s.t('m_source_code')),

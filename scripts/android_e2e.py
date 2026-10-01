@@ -74,7 +74,7 @@ def main() -> int:
 
     def spawn(cmd: list[str], log: Path, stdin=None) -> subprocess.Popen:
         p = subprocess.Popen(cmd, cwd=ROOT, stdout=open(log, "w", encoding="utf-8"), stderr=subprocess.STDOUT,
-                             stdin=stdin, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+                             stdin=stdin, env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"})
         procs.append(p)
         return p
 
@@ -92,12 +92,10 @@ def main() -> int:
         to_phone = work / "to-phone.bin"
         to_phone.write_bytes(os.urandom(args.mb << 20))
         recv_code, send_code = "e2er-0001", "e2es-0001"
-        pc_sender = spawn([py, "-m", "app.cli", "--relay", relay_url, "--yes", "send", str(to_phone),
-                           "--code", recv_code], work / "pc_sender.log")
+        pc_sender = None  # started when the app is up (the build can take longer than it waits)
         inbox = work / "pc-inbox"
         inbox.mkdir()
-        pc_receiver = spawn([py, "-m", "app.cli", "--relay", relay_url, "--yes", "receive", send_code,
-                             "--out", str(inbox)], work / "pc_receiver.log")
+        pc_receiver = None  # started when the app starts sending (it gives up after 5 min of waiting)
 
         cmd = [flutter, "test", "integration_test/app_e2e_test.dart", "--reporter", "expanded",
                f"--dart-define=RELAY_URL=ws://10.0.2.2:{args.port}",
@@ -109,6 +107,18 @@ def main() -> int:
                                 text=True, encoding="utf-8", errors="replace")
         procs.append(test)
 
+        # Android ≤ 10 asks for the storage permission; a test can't tap the system
+        # dialog, so grant it as soon as the app is installed (fails harmlessly on 11+)
+        def grant_storage() -> None:
+            while test.poll() is None:
+                r = subprocess.run(adb + ["shell", "pm", "grant", APP_ID, "android.permission.WRITE_EXTERNAL_STORAGE"],
+                                   capture_output=True, text=True)
+                out = r.stdout + r.stderr
+                if r.returncode == 0 or "not a changeable permission" in out or "has not requested" in out:
+                    return
+                time.sleep(0.5)
+        threading.Thread(target=grant_storage, daemon=True).start()
+
         def later(delay: float, *adb_args: str) -> None:
             threading.Timer(delay, lambda: subprocess.run(adb + list(adb_args), capture_output=True)).start()
 
@@ -116,7 +126,10 @@ def main() -> int:
         transferring = 0
         for line in test.stdout:
             print(line, end="", flush=True)
-            if "E2E:TRANSFERRING" in line:
+            if "E2E:RECEIVE_START" in line:
+                pc_sender = spawn([py, "-m", "app.cli", "--relay", relay_url, "--yes", "send", str(to_phone),
+                                   "--code", recv_code], work / "pc_sender.log")
+            elif "E2E:TRANSFERRING" in line:
                 transferring += 1
                 if transferring == 1:   # receiving: leave the app, come back later
                     print(">>> Home, back in 8 s", flush=True)
@@ -128,12 +141,17 @@ def main() -> int:
                     later(10, "shell", "input", "keyevent", "KEYCODE_WAKEUP")
             elif "E2E:SENT_SHA" in line:
                 sent_sha = line.split("E2E:SENT_SHA", 1)[1].strip()
+                pc_receiver = spawn([py, "-m", "app.cli", "--relay", relay_url, "--yes", "receive", send_code,
+                                     "--out", str(inbox)], work / "pc_receiver.log")
         code = test.wait()
 
         problems = []
         if code != 0:
             problems.append(f"flutter test exited with {code}")
         for name, proc in (("PC sender", pc_sender), ("PC receiver", pc_receiver)):
+            if proc is None:
+                problems.append(f"{name} was never started")
+                continue
             try:
                 proc.wait(timeout=30)
             except subprocess.TimeoutExpired:

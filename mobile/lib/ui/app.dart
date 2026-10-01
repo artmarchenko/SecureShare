@@ -9,6 +9,7 @@ import '../app/device.dart';
 import '../app/diagnostics.dart';
 import '../app/i18n.dart';
 import '../app/settings.dart';
+import '../app/updates.dart';
 import 'home_page.dart';
 
 /// Everything the screens need, created once in main() (or by a test).
@@ -18,6 +19,7 @@ class AppServices {
     required this.strings,
     required this.settings,
     required this.controller,
+    required this.updates,
     this.relayUrl = 'wss://secureshare-relay.duckdns.org',
     this.diagnostics = runDiagnostics,
   });
@@ -26,6 +28,7 @@ class AppServices {
   final Strings strings;
   final Settings settings;
   final TransferController controller;
+  final Updates updates;
   final String relayUrl;
   final Future<int> Function(String relayUrl, Strings s, ReportRow report) diagnostics;
 }

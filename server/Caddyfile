@@ -50,6 +50,21 @@ secureshare-relay.duckdns.org {
 		header Content-Security-Policy "default-src 'none'"
 		redir https://github.com/artmarchenko/SecureShare/releases/latest/download/SecureShare-linux-x64.tar.gz 302
 	}
+	# Android: Android releases are not GitHub's "latest" (that is the desktop
+	# app), so release-android.yml uploads the APK here (./downloads on the VPS).
+	handle /download/SecureShare.apk {
+		header Content-Security-Policy "default-src 'none'"
+		root * /downloads
+		@uploaded file /SecureShare.apk
+		@missing not file /SecureShare.apk
+		header @uploaded Content-Type "application/vnd.android.package-archive"
+		header @uploaded Content-Disposition "attachment; filename=SecureShare.apk"
+		header @uploaded Cache-Control "no-cache"
+		rewrite @uploaded /SecureShare.apk
+		file_server @uploaded
+		# not uploaded yet: the releases page
+		redir @missing https://github.com/artmarchenko/SecureShare/releases 302
+	}
 	# Fallback for any unknown download path.
 	handle /download/* {
 		header Content-Security-Policy "default-src 'none'"

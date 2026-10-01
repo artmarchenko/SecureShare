@@ -69,6 +69,8 @@ class NativeDevice implements Device {
           _shared.add(null);
         case 'cancelRequested':
           _cancel.add(null);
+        case 'selfTest':
+          _selfTest.add(null);
       }
     });
   }
@@ -76,6 +78,11 @@ class NativeDevice implements Device {
   static const _channel = MethodChannel('secureshare/native');
   final _shared = StreamController<void>.broadcast();
   final _cancel = StreamController<void>.broadcast();
+  final _selfTest = StreamController<void>.broadcast();
+
+  /// The app was started with `--ez selftest true` (now or before Dart was ready).
+  Stream<void> get selfTestRequested => _selfTest.stream;
+  Future<bool> takeSelfTest() async => await _channel.invokeMethod<bool>('takeSelfTest') ?? false;
 
   PickedFile? _picked(Object? raw) {
     if (raw is! Map) return null;

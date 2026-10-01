@@ -179,9 +179,17 @@ jobs:
           if-no-files-found: ignore
 
   android-e2e:
-    name: Android app on an emulator (end-to-end with the PC client)
+    name: Android ${{ matrix.android }} emulator (end-to-end with the PC client)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - android: "14"
+            api-level: 34
+          - android: "10"   # legacy storage: Download/ needs the runtime permission
+            api-level: 29
     steps:
       - uses: actions/checkout@v4
 
@@ -220,7 +228,7 @@ jobs:
       - name: Run on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: ${{ matrix.api-level }}
           target: google_apis
           arch: x86_64
           disable-animations: true

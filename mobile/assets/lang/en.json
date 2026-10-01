@@ -44,5 +44,11 @@
   "m_help_send_body": "1.  On the Send tab, tap “Choose file”\n2.  Tap “Send” — a session code appears\n3.  Give the code to the recipient (the Share button helps)\n4.  Compare the verification code and tap “Codes match”\n\nYou can also send from another app: Share → SecureShare.",
   "m_help_recv_body": "1.  On the Receive tab, enter the code from the sender\n2.  Tap “Receive”\n3.  Compare the verification code and tap “Codes match”\n\nFiles are saved to Download/SecureShare. An existing file is never overwritten — the new one is saved as “name (1).ext”.",
   "m_help_background_title": "📱  In the background",
-  "m_help_background_body": "The transfer continues with the screen off or another app open: progress is shown in a notification, where you can also cancel it.\n\nIf the phone still stops the transfer (battery saver), start it again with a new code — what was already transferred is not sent twice."
+  "m_help_background_body": "The transfer continues with the screen off or another app open: progress is shown in a notification, where you can also cancel it.\n\nIf the phone still stops the transfer (battery saver), start it again with a new code — what was already transferred is not sent twice.",
+  "m_update_available": "New version {version} is available",
+  "m_update_details": "Details",
+  "m_update_later": "Later",
+  "m_update_download": "Download",
+  "m_update_install_hint": "Open the downloaded file and confirm the installation. Android may ask you to allow installs from your browser — only once. Your data and settings are kept.",
+  "m_update_check": "Check for updates"
 }

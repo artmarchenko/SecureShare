@@ -1,5 +1,6 @@
 // Walks the app through every screen and state, calling [shot] on each —
 // used by the layout tests (overflow = failure) and by the screenshots.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -100,6 +101,24 @@ Future<void> walkScreens(WidgetTester tester, Harness h, Shot shot) async {
   await shot('12-settings');
   await tester.tap(find.byType(BackButton));
   await tester.pumpAndSettle();
+
+  // ── Update available ──
+  releasesJson = jsonEncode([
+    {
+      'tag_name': 'android-v1.1.0',
+      'body': '### Changes\n- Faster resume after a dropped connection\n- Shows the battery-saver hint on Xiaomi',
+      'assets': [
+        {'name': 'SecureShare.apk', 'browser_download_url': 'https://example.test/SecureShare.apk'},
+      ],
+    },
+  ]);
+  await h.services.updates.check();
+  releasesJson = '[]';
+  await tester.pumpAndSettle();
+  await shot('13-update-banner');
+  await _tap(tester, find.byKey(const Key('update-details')));
+  await shot('14-update-dialog');
+  await _tap(tester, find.text(h.t('btn_close')));
 }
 
 /// A long name: the worst case for the file card.

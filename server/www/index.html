@@ -585,6 +585,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Linux
         </a>
+        <a href="/download/SecureShare.apk" class="btn btn-primary" style="background: linear-gradient(135deg, #2E7D32, #66BB6A);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+          Android
+        </a>
         <a href="https://github.com/artmarchenko/SecureShare" class="btn btn-secondary" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
           GitHub
@@ -738,7 +742,13 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Linux
         </a>
+        <a href="/download/SecureShare.apk" class="btn btn-primary" style="background: linear-gradient(135deg, #2E7D32, #66BB6A); box-shadow: 0 4px 20px rgba(46,125,50,.4);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+          Android
+        </a>
       </div>
+      <p style="margin-top: 20px; font-size: .9rem; opacity: .85;" data-i18n="android_note">Android 7.0 і новіші: відкрийте завантажений файл і дозвольте встановлення, коли телефон попросить. Працює з SecureShare 4.x на комп'ютері.</p>
+      <p style="margin-top: 6px; font-size: .75rem; opacity: .7; word-break: break-all;"><span data-i18n="android_cert">Сертифікат підпису APK (SHA-256):</span> <code>64:33:7E:8C:F0:78:98:45:A3:F4:93:C9:57:E3:0E:D6:22:72:D9:C0:E3:4D:AD:70:36:00:4B:DA:2F:85:71:EC</code></p>
     </div>
   </section>
 
@@ -748,6 +758,21 @@
       <h2 class="section-title" data-i18n="changelog_title">Історія розвитку</h2>
       <p class="section-sub" data-i18n="changelog_sub">Проєкт активно розвивається — кожна версія робить передачу файлів безпечнішою та зручнішою</p>
       <div class="timeline">
+
+        <div class="tl-item latest">
+          <div class="tl-dot"></div>
+          <div class="tl-header">
+            <span class="tl-version">Android 1.0.0</span>
+            <span class="tl-date" data-i18n="date_oct_2026">Жовтень 2026</span>
+            <span class="tl-tag features" data-i18n="tag_android">Android</span>
+          </div>
+          <ul class="tl-changes">
+            <li class="feat" data-i18n="cl_a100_1">Перша версія для Android: надсилання й отримання файлів до 5 ГБ, сумісна з SecureShare 4.x на комп'ютері</li>
+            <li class="feat" data-i18n="cl_a100_2">Надсилання з будь-якого застосунку через «Поділитися»</li>
+            <li class="feat" data-i18n="cl_a100_3">Передача триває з вимкненим екраном; прогрес і «Скасувати» у сповіщенні; автоперепідключення й докачування</li>
+            <li class="fix" data-i18n="cl_a100_4">Перевіряється автотестами на емуляторі разом із версією для комп'ютера</li>
+          </ul>
+        </div>
 
         <div class="tl-item latest major">
           <div class="tl-dot"></div>
@@ -898,7 +923,7 @@
         <a href="https://github.com/artmarchenko/SecureShare/issues" target="_blank" rel="noopener" data-i18n="footer_bug">Повідомити про баг</a>
         <a href="https://ko-fi.com/secureshare" target="_blank" rel="noopener" data-i18n="footer_support">☕ Підтримати</a>
       </div>
-      <p>SecureShare v4.0.0 &mdash; Windows &amp; Linux &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
+      <p>SecureShare v4.0.0 &amp; Android 1.0.0 &mdash; Windows, Linux &amp; Android &bull; Open Source &bull; End-to-End Encrypted &bull; Zero Knowledge</p>
     </div>
   </footer>
 

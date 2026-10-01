@@ -11,6 +11,7 @@ import 'package:secureshare/app/device.dart';
 import 'package:secureshare/app/diagnostics.dart';
 import 'package:secureshare/app/i18n.dart';
 import 'package:secureshare/app/settings.dart';
+import 'package:secureshare/app/updates.dart';
 import 'package:secureshare/transfer/status.dart';
 import 'package:secureshare/transfer/storage.dart';
 import 'package:secureshare/ui/app.dart';
@@ -157,6 +158,9 @@ Future<int> fakeDiagnostics(String relayUrl, Strings s, ReportRow report) async 
   return diagnosticChecks.length;
 }
 
+/// What the fake GitHub API returns (tests change it before checking).
+String releasesJson = '[]';
+
 class Harness {
   Harness(this.services, this.device, this.engine);
   final AppServices services;
@@ -185,6 +189,7 @@ Harness harnessWith(Strings strings, {Duration verifyTimeout = const Duration(se
     strings: strings,
     settings: Settings.memory(),
     controller: controller,
+    updates: Updates(fetch: (_) async => releasesJson, current: '1.0.0'),
     diagnostics: fakeDiagnostics,
   );
   return Harness(services, device, engine);
