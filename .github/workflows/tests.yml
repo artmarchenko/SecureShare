@@ -160,12 +160,10 @@ jobs:
       - name: Static analysis
         run: flutter analyze
 
-      # real fonts for the screenshots: Flutter's Roboto + Material icons, emoji, a monospace font
+      # real fonts for the screenshots: Roboto, emoji, a monospace font
       - name: Fonts
         working-directory: .
-        run: |
-          flutter precache --universal --force   # the cached SDK may have the stamp without the files
-          sudo apt-get install -y --no-install-recommends fonts-noto-color-emoji fonts-dejavu-core
+        run: sudo apt-get install -y --no-install-recommends fonts-roboto fonts-noto-color-emoji fonts-dejavu-core
 
       - name: Protocol vectors, screens, translations, interop with the Python client, memory
         env:

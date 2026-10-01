@@ -17,38 +17,48 @@ import 'package:secureshare/app/i18n.dart';
 import 'fakes.dart';
 import 'screens.dart';
 
-Future<void> _loadFont(String family, List<String> paths) async {
+/// Loads the first existing file of each weight in [candidates]; false if none.
+Future<bool> _loadFont(String family, List<List<String>> candidates) async {
   final loader = FontLoader(family);
   var any = false;
-  for (final path in paths) {
-    final f = File(path);
-    if (f.existsSync()) {
-      loader.addFont(f.readAsBytes().then(ByteData.sublistView));
-      any = true;
+  for (final paths in candidates) {
+    for (final path in paths) {
+      final f = File(path);
+      if (f.existsSync()) {
+        loader.addFont(f.readAsBytes().then(ByteData.sublistView));
+        any = true;
+        break;
+      }
     }
   }
   if (any) await loader.load();
+  return any;
 }
 
 void main() {
-  // <flutter>/bin/cache/artifacts/material_fonts, found from the test runner
-  // (…/bin/cache/artifacts/engine/<platform>/flutter_tester) or FLUTTER_ROOT
-  final fonts = [
-    p.join(p.dirname(p.dirname(p.dirname(Platform.resolvedExecutable))), 'material_fonts'),
-    p.join(Platform.environment['FLUTTER_ROOT'] ?? '', 'bin', 'cache', 'artifacts', 'material_fonts'),
-  ].firstWhere((d) => File(p.join(d, 'roboto-regular.ttf')).existsSync(),
-      orElse: () => throw StateError('Flutter material fonts not found near ${Platform.resolvedExecutable}'));
+  // Flutter's own copy (…/bin/cache/artifacts/material_fonts, next to the test
+  // runner), else the system one (Linux CI: apt install fonts-roboto)
+  final flutterFonts = p.join(p.dirname(p.dirname(p.dirname(Platform.resolvedExecutable))), 'material_fonts');
+  List<String> roboto(String weight, String file) => [
+        p.join(flutterFonts, 'roboto-$weight.ttf'),
+        '/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-$file.ttf',
+        '/usr/share/fonts/truetype/roboto/hinted/Roboto-$file.ttf',
+      ];
+
   setUpAll(() async {
-    await _loadFont('Roboto', [
-      for (final w in ['regular', 'medium', 'bold']) p.join(fonts, 'roboto-$w.ttf'),
-    ]);
-    await _loadFont('MaterialIcons', [p.join(fonts, 'materialicons-regular.otf')]);
+    if (!await _loadFont('Roboto', [roboto('regular', 'Regular'), roboto('medium', 'Medium'), roboto('bold', 'Bold')])) {
+      throw StateError('Roboto not found (Flutter material_fonts or apt fonts-roboto)');
+    }
+    // the icon font every Flutter test bundle carries (uses-material-design)
+    final icons = FontLoader('MaterialIcons')..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+    await icons.load();
     // emoji in status texts: whatever the machine has
-    await _loadFont('Emoji', ['/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', r'C:\Windows\Fonts\seguiemj.ttf']);
+    await _loadFont('Emoji', [
+      ['/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', r'C:\Windows\Fonts\seguiemj.ttf'],
+    ]);
     // CodeText asks for the platform's 'monospace'
     await _loadFont('monospace', [
-      '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
-      r'C:\Windows\Fonts\consola.ttf',
+      ['/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', r'C:\Windows\Fonts\consola.ttf'],
     ]);
   });
 
