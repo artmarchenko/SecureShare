@@ -842,6 +842,28 @@ Known defects are recorded as `xfail(strict=True)` with the finding ID from
 CI: `.github/workflows/tests.yml` (Windows + Linux) runs on every push/PR and
 gates `release.yml` builds. Coverage threshold: `.coveragerc` (`fail_under`).
 
+### 11.0a. Protocol Test Vectors (for other implementations)
+
+`tests/vectors/protocol_v2.json` pins every derived value of protocol v2 —
+session secrets from codes, keys and verification code for fixed X25519 keys,
+commitment, reconnect proofs, encrypted control/data frames, a signaling
+frame, transfer IDs and file-name sanitising. Other clients (the Android app)
+must reproduce them byte for byte; `tests/unit/test_protocol_vectors.py`
+keeps the file in sync with `app/`. Regenerate after an intentional protocol
+change with `python scripts/protocol_vectors.py`.
+
+### 11.0b. Command-Line Client
+
+```bash
+python -m app.cli send report.pdf                 # prints CODE: xxxx-xxxx, then VERIFY: XXXX-XXXX
+python -m app.cli receive xxxx-xxxx --out ~/Downloads
+python -m app.cli --relay ws://127.0.0.1:8765 --yes send f.bin --code test-0001   # tests / local relay
+```
+
+Same transfer code as the desktop app, no GUI. `--yes` skips the verification
+prompt — only for tests or two machines you control. Exit codes: 0 ok, 1
+failed/rejected, 2 usage, 130 interrupted.
+
 ### 11.1. Live Server Smoke Tests
 
 ```bash
