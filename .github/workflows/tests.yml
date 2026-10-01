@@ -122,9 +122,9 @@ jobs:
           retention-days: 14
 
   android-core:
-    name: Android protocol core (Dart)
+    name: Android core (Dart) + interop with Python
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: mobile
@@ -137,11 +137,26 @@ jobs:
           channel: stable
           cache: true
 
+      # interop tests start the repo's relay and Python CLI client
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            server/requirements.txt
+
+      - name: Python dependencies (relay + CLI peer)
+        working-directory: .
+        run: pip install "cryptography>=46.0.5" "websocket-client>=1.7.0" certifi -r server/requirements.txt
+
       - name: Dependencies
         run: flutter pub get
 
       - name: Static analysis
         run: flutter analyze
 
-      - name: Protocol vectors (must match the Python implementation byte for byte)
+      - name: Protocol vectors + interop with the Python client + memory
+        env:
+          PYTHON: python
         run: flutter test
