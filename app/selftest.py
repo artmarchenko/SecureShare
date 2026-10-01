@@ -31,7 +31,12 @@ def run() -> int:
 
     problems: list[str] = []
 
-    for rel in ("assets/SecureShare.ico", "assets/icon_32.png"):
+    # The .ico is only used (and bundled) on Windows
+    if sys.platform == "win32":
+        resources = ("assets/SecureShare.ico", "assets/icon_32.png")
+    else:
+        resources = ("assets/icon_32.png",)
+    for rel in resources:
         if not (_resource_root() / rel).is_file():
             problems.append(f"missing resource: {rel}")
 

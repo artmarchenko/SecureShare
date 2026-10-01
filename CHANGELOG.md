@@ -29,6 +29,7 @@
 - Diagnostics: WebSocket check now works in the packaged app; internet check uses port 443.
 - Update downloads no longer leave temporary folders behind.
 - Server statistics survive a restart right after a month change.
+- Linux build: translations are bundled again (the 3.4 Linux binary showed raw message keys).
 
 ### Under the hood
 - Automated test suite (≈300 tests: unit, server, integration with a real relay, malicious-peer, GUI incl. full transfers through the window) on Windows and Linux; releases build only from a green suite.

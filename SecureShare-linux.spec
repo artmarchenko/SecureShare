@@ -2,7 +2,7 @@
 # PyInstaller spec for Linux builds.
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets/icon_32.png', 'assets')]
+datas = [('assets/icon_32.png', 'assets'), ('app/lang', 'lang')]
 binaries = []
 hiddenimports = ['customtkinter', 'certifi', 'websocket']
 tmp_ret = collect_all('customtkinter')
