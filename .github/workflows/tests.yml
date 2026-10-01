@@ -20,6 +20,7 @@ on:
       - "pytest.ini"
       - ".coveragerc"
       - "scripts/ui_screenshots.py"
+      - "mobile/**"
       - ".github/workflows/tests.yml"
   pull_request:
     branches: [main]
@@ -32,6 +33,7 @@ on:
       - "pytest.ini"
       - ".coveragerc"
       - "scripts/ui_screenshots.py"
+      - "mobile/**"
       - ".github/workflows/tests.yml"
   workflow_call:
   workflow_dispatch:
@@ -118,3 +120,28 @@ jobs:
           name: ui-screenshots-${{ runner.os }}
           path: ui-screenshots/*.png
           retention-days: 14
+
+  android-core:
+    name: Android protocol core (Dart)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.5"
+          channel: stable
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Protocol vectors (must match the Python implementation byte for byte)
+        run: flutter test
