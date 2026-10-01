@@ -12,8 +12,6 @@ from __future__ import annotations
 import datetime
 import logging
 import random
-import secrets
-import string
 import sys
 import threading
 import time
@@ -33,6 +31,7 @@ from .config import (
     SESSION_CODE_LENGTH,
     VPS_MAX_FILE_SIZE,
 )
+from .crypto_utils import new_session_code
 from .format import human_eta, human_size, human_speed
 from .ws_relay import TransferState, VPSRelaySender, VPSRelayReceiver
 from .updater import check_for_update, clear_skipped, ReleaseInfo
@@ -64,9 +63,7 @@ def _startup_tips() -> list[str]:
 
 
 def _generate_code() -> str:
-    chars = string.ascii_lowercase + string.digits
-    code = "".join(secrets.choice(chars) for _ in range(SESSION_CODE_LENGTH))
-    return f"{code[:4]}-{code[4:]}"
+    return new_session_code(SESSION_CODE_LENGTH)
 
 
 def _timestamp() -> str:

@@ -75,6 +75,15 @@ class SessionSecrets:
         )
 
 
+def new_session_code(length: int = 8) -> str:
+    """Random session code like 'a7f3-bc21' (lowercase letters and digits)."""
+    import secrets
+    import string
+    chars = string.ascii_lowercase + string.digits
+    code = "".join(secrets.choice(chars) for _ in range(length))
+    return f"{code[:4]}-{code[4:]}"
+
+
 def signaling_encrypt(key: bytes, plaintext: bytes) -> bytes:
     """Encrypt a signaling payload: 12-byte random nonce ‖ ciphertext+tag.
 
@@ -94,9 +103,12 @@ def signaling_decrypt(key: bytes, data: bytes) -> bytes:
 #  Commit-then-reveal (sender commits to its key before seeing the peer's)
 # ════════════════════════════════════════════════════════════════════
 
-def make_commitment(public_key: bytes) -> tuple[bytes, bytes]:
-    """Return (commitment, opening_nonce) for `public_key`."""
-    opening = os.urandom(32)
+def make_commitment(public_key: bytes, opening: bytes | None = None) -> tuple[bytes, bytes]:
+    """Return (commitment, opening_nonce) for `public_key`.
+
+    `opening` is only passed by the test-vector generator; normally random.
+    """
+    opening = os.urandom(32) if opening is None else opening
     return hashlib.sha256(LABEL + b"|commit" + public_key + opening).digest(), opening
 
 
@@ -126,12 +138,14 @@ class CryptoSession:
     NONCE_LEN = 12
     TAG_LEN = 16  # GCM tag is appended by AESGCM automatically
 
-    def __init__(self, secrets: SessionSecrets, role: str):
+    def __init__(self, secrets: SessionSecrets, role: str, private_key: bytes | None = None):
+        """`private_key` (raw 32 bytes) is only for deterministic test vectors."""
         if role not in _ROLES:
             raise ValueError(f"unknown role {role!r}")
         self.secrets = secrets
         self.role = role
-        self._private_key = X25519PrivateKey.generate()
+        self._private_key = (X25519PrivateKey.generate() if private_key is None
+                             else X25519PrivateKey.from_private_bytes(private_key))
         self._shared_key: bytes | None = None
         self._aes: AESGCM | None = None
         self._send_counter = 0
