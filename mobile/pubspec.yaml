@@ -36,6 +36,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   cryptography: ^2.9.0
   pointycastle: ^4.0.0
+  async: ^2.13.1
+  crypto: ^3.0.7
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:

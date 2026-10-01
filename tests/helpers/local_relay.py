@@ -38,11 +38,11 @@ def load_server_modules(data_dir: Path):
 
 
 class LocalRelay:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, host: str = "127.0.0.1") -> None:
         self.relay_mod, self.analytics_mod = load_server_modules(data_dir)
         self.ws_port = _free_port()
         self.http_port = _free_port()
-        self.relay_mod.LISTEN_HOST = "127.0.0.1"
+        self.relay_mod.LISTEN_HOST = host
         self.relay_mod.LISTEN_PORT = self.ws_port
         self.relay_mod.HEALTH_PORT = self.http_port
 
