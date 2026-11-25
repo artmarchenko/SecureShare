@@ -4,6 +4,8 @@
 
 ### Fixed
 - A transfer no longer hangs when only one side loses its connection (e.g. the sender's network drops for a moment). The relay now closes the other side's connection too, so both apps reconnect and continue automatically. Before, the side that stayed connected waited forever and the reconnect never completed. No app update needed.
+- Transfers longer than 30 minutes are no longer interrupted: the room timeout now counts from the last activity, not from when the session started.
+- Fixed an error in the relay's cleanup of expired rooms.
 
 ## Android 1.0.0 — 2026-10
 

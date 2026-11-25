@@ -97,6 +97,11 @@ class LocalRelay:
             return count
         return asyncio.run_coroutine_threadsafe(_drop(), self._loop).result(5)
 
+    def close_stale_rooms(self) -> int:
+        """Run one pass of the relay's stale-room cleanup now."""
+        return asyncio.run_coroutine_threadsafe(
+            self.server._close_stale_rooms(), self._loop).result(15)
+
     def close(self) -> None:
         def _cancel_all() -> None:
             for task in asyncio.all_tasks(self._loop):

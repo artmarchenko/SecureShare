@@ -624,7 +624,7 @@ async def _send_response(
 class RelayServer:
     def __init__(self):
         self._rooms: dict[str, list] = {}
-        self._room_created: dict[str, float] = {}
+        self._room_seen: dict[str, float] = {}   # last activity (join or relayed frame)
         self._room_events: dict[str, asyncio.Event] = {}  # signals when room is paired
         self._rate_limiter = RateLimiter()
         self._stats_basic = {"total_connections": 0, "total_rooms": 0, "active_rooms": 0}
@@ -749,7 +749,7 @@ class RelayServer:
             # ── Step 2: join room ────────────────────────────────────
             if room_id not in self._rooms:
                 self._rooms[room_id] = []
-                self._room_created[room_id] = time.monotonic()
+                self._room_seen[room_id] = time.monotonic()
                 self._room_events[room_id] = asyncio.Event()
                 self._stats_basic["total_rooms"] += 1
                 self._stats_basic["active_rooms"] += 1
@@ -767,6 +767,7 @@ class RelayServer:
                 return
 
             room.append(ws)
+            self._room_seen[room_id] = time.monotonic()
             log.info("Peer joined room [%.8s…] (%d/2) from %s", room_id, len(room), _ip_tag(ip))
 
             # Update peak rooms
@@ -816,6 +817,8 @@ class RelayServer:
                         await peer.send(message)
                     except Exception:
                         break
+                    if room_id in self._room_seen:      # an active room is not stale
+                        self._room_seen[room_id] = time.monotonic()
                     transport = getattr(peer, "transport", None)
                     if transport is not None:
                         buf_size = transport.get_write_buffer_size()
@@ -876,7 +879,7 @@ class RelayServer:
                 pass
             if not self._rooms[room_id]:
                 del self._rooms[room_id]
-                self._room_created.pop(room_id, None)
+                self._room_seen.pop(room_id, None)
                 self._room_events.pop(room_id, None)
                 self._stats_basic["active_rooms"] = max(0, self._stats_basic["active_rooms"] - 1)
                 log.info("Room [%.8s…] closed", room_id)
@@ -890,30 +893,39 @@ class RelayServer:
                 if cleaned_ips:
                     log.debug("Rate limiter: cleaned %d stale IPs", cleaned_ips)
                 self._http_router._api_limiter.cleanup()
-                now = time.monotonic()
-                stale = [
-                    rid for rid, created in self._room_created.items()
-                    if now - created > ROOM_TIMEOUT
-                ]
-                for rid in stale:
-                    if rid in self._rooms:
-                        room = self._rooms[rid]
-                        for ws in list(room):
-                            try:
-                                await ws.close(4002, "room timeout")
-                            except Exception:
-                                pass
-                        room.clear()
-                        del self._rooms[rid]
-                        self._room_created.pop(rid, None)
-                        self._room_events.pop(rid, None)
-                        self._stats_basic["active_rooms"] = max(0, self._stats_basic["active_rooms"] - 1)
-                        self._analytics.record_session_timeout()
-                        log.info("Stale room [%.8s…] cleaned up", rid)
+                await self._close_stale_rooms()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("Error in cleanup loop")
+
+    async def _close_stale_rooms(self) -> int:
+        """Close rooms with no activity (join or relayed frame) for ROOM_TIMEOUT.
+
+        A room that is relaying data is never stale, however long the
+        transfer takes. Each room is unregistered before its sockets are
+        closed: closing yields to the connection handlers, whose own cleanup
+        then finds nothing left to remove (no double delete or double count).
+        """
+        now = time.monotonic()
+        stale = [rid for rid, seen in self._room_seen.items() if now - seen > ROOM_TIMEOUT]
+        for rid in stale:
+            self._room_seen.pop(rid, None)
+            self._room_events.pop(rid, None)
+            room = self._rooms.pop(rid, None)
+            if room is None:
+                continue
+            self._stats_basic["active_rooms"] = max(0, self._stats_basic["active_rooms"] - 1)
+            self._analytics.record_session_timeout()
+            log.info("Stale room [%.8s…] cleaned up", rid)
+            sockets = list(room)
+            room.clear()
+            for ws in sockets:
+                try:
+                    await ws.close(4002, "room timeout")
+                except Exception:
+                    pass
+        return len(stale)
 
     async def _stats_loop(self) -> None:
         """Log stats every 5 minutes."""
