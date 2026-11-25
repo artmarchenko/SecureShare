@@ -2,7 +2,10 @@
 
 import hashlib
 import os
+import socket
 import threading
+
+import pytest
 
 from app.config import VPS_CHUNK_SIZE
 
@@ -86,5 +89,27 @@ def test_auto_reconnect_after_network_drop(transfer, tmp_path, relay, slow_sende
     assert run.received.read_bytes() == src.read_bytes()
     # The user confirmed the code once per side; the reconnect was auto-verified.
     assert len(verify_calls) == 2
+    assert "relay_auto_verify_ok" in run.receiver_log
+    assert "relay_auto_verify_ok" in run.sender_log
+
+
+@pytest.mark.parametrize("side", ["sender", "receiver"])
+def test_auto_reconnect_when_only_one_side_drops(transfer, tmp_path, relay, slow_sender, side):
+    """Only one peer loses its connection (the case seen in production on
+    2026-11-25): the relay must close the other peer too, so that both sides
+    reconnect into a fresh room instead of the survivor waiting forever."""
+    src = _big_file(tmp_path)
+    run = transfer(src)
+    gate = _stop_after(run, 0.3)
+    run.start()
+    assert gate.wait(30)
+
+    peer = run.sender if side == "sender" else run.receiver
+    peer._ws.sock.shutdown(socket.SHUT_RDWR)    # this side's network dies
+    run.join(timeout=90)
+
+    assert run.sent is True
+    assert run.received is not None
+    assert run.received.read_bytes() == src.read_bytes()
     assert "relay_auto_verify_ok" in run.receiver_log
     assert "relay_auto_verify_ok" in run.sender_log

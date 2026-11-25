@@ -726,6 +726,7 @@ class RelayServer:
         self._stats_basic["total_connections"] += 1
         self._analytics.record_connection()
         room_id = None
+        peer = None
         paired = False
         relay_start = None
         bytes_relayed = 0
@@ -842,6 +843,17 @@ class RelayServer:
 
             if room_id:
                 self._cleanup_room(room_id, ws)
+
+            # A relayed session needs both sockets: if ours is gone, close the
+            # peer's too. Otherwise the peer keeps waiting on a socket nobody
+            # writes to (our pings keep it alive), and when we reconnect we
+            # would be paired with a peer whose replies go to our dead socket.
+            # Closed, the peer reconnects too and both meet in a fresh room.
+            if paired and peer is not None and not self._is_closed(peer):
+                try:
+                    await peer.close(4004, "peer disconnected")
+                except Exception:
+                    pass
 
     @staticmethod
     def _is_closed(ws) -> bool:

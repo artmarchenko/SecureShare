@@ -235,6 +235,64 @@ void main() {
     expect(keys, contains('relay_resume_found'));
   });
 
+  // Only the phone's network drops; the PC stays connected. The relay must
+  // close the PC's connection too, or the PC waits forever (seen in
+  // production 2026-11-25) and the phone's reconnect never completes.
+  test('only the phone drops (phone receives): both sides reconnect', () async {
+    final proxy = FlakyProxy();
+    final url = await proxy.start(relayUrl);
+    final src = await randomFile(tmp, 'big.bin', 12 * 1024 * 1024);
+    final inbox = await Directory(p.join(tmp.path, 'in')).create();
+    final code = newCode();
+    final keys = <String>[];
+    var dropped = false;
+    final py = pythonCli(['--yes', 'send', src.path, '--code', code]); // direct, not via proxy
+    final receiver = TransferReceiver(code, ReceiveFolder(inbox), fastOptions(url),
+        onVerify: (_) async => true,
+        onStatus: (k, _) => keys.add(k),
+        onProgress: (done, total, _) {
+          if (!dropped && done > total * 0.3) {
+            dropped = true;
+            proxy.dropAll();
+          }
+        });
+    final saved = await receiver.receive().timeout(const Duration(minutes: 2));
+    final (exit, lines) = await py;
+    await proxy.close();
+    expect(dropped, isTrue);
+    expect(exit, 0, reason: lines.join('\n'));
+    expect(saved, isNotNull);
+    expect(await sameContent(src, saved!), isTrue);
+    expect(keys, contains('relay_auto_verify_ok'));
+  });
+
+  test('only the phone drops (phone sends): both sides reconnect', () async {
+    final proxy = FlakyProxy();
+    final url = await proxy.start(relayUrl);
+    final src = await randomFile(tmp, 'big.bin', 12 * 1024 * 1024);
+    final inbox = await Directory(p.join(tmp.path, 'pc')).create();
+    final code = newCode();
+    final keys = <String>[];
+    var dropped = false;
+    final py = pythonCli(['--yes', 'receive', code, '--out', inbox.path]); // direct, not via proxy
+    final sender = TransferSender(code, LocalFileSource(src), fastOptions(url),
+        onVerify: (_) async => true,
+        onStatus: (k, _) => keys.add(k),
+        onProgress: (done, total, _) {
+          if (!dropped && done > total * 0.3) {
+            dropped = true;
+            proxy.dropAll();
+          }
+        });
+    expect(await sender.send().timeout(const Duration(minutes: 2)), isTrue);
+    final (exit, lines) = await py;
+    await proxy.close();
+    expect(dropped, isTrue);
+    expect(exit, 0, reason: lines.join('\n'));
+    expect(await sameContent(src, File(p.join(inbox.path, 'big.bin'))), isTrue);
+    expect(keys, contains('relay_auto_verify_ok'));
+  });
+
   test('cancel, then resume in a new session (Dart → Python)', () async {
     final src = await randomFile(tmp, 'resume.bin', 10 * 1024 * 1024);
     final inbox = await Directory(p.join(tmp.path, 'in')).create();

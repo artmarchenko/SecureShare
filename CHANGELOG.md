@@ -1,5 +1,10 @@
 # Changelog
 
+## Relay server — 2026-11-25
+
+### Fixed
+- A transfer no longer hangs when only one side loses its connection (e.g. the sender's network drops for a moment). The relay now closes the other side's connection too, so both apps reconnect and continue automatically. Before, the side that stayed connected waited forever and the reconnect never completed. No app update needed.
+
 ## Android 1.0.0 — 2026-10
 
 First version of SecureShare for Android. Works with SecureShare 4.x on Windows and Linux (protocol v2) and with other phones.
